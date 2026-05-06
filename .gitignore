@@ -1,3 +1,5 @@
+reverse-engineering
+
 # Miscellaneous
 *.class
 *.lock
@@ -6,6 +8,7 @@
 *.swp
 .buildlog/
 .history
+.DS_Store
 
 
 
