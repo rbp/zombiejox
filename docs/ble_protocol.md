@@ -2,7 +2,19 @@
 
 Reverse-engineered from decompiled `com.jaxjox.mobile` v3.1.0 APK. All paths below are relative to `reverse-engineering/decompiled/sources/`.
 
-> **Status**: derived from static analysis only. A few items (checksum algorithm, exact meaning of status response bytes, kg/lbs toggle command) require runtime verification before the replacement client will work.
+> **Status**: Set-weight + status query + time-sync + username are all validated end-to-end against a real DumbbellConnect (`DB200-0161997`, hardware V1.0, firmware V1.0, software V1.1.4db). Setting a weight from the app side physically moves the dumbbell. Open items: exact meaning of `0xD1` byte 5, `0xD2` 24-bit fields (likely reps/volume/power, untested without a workout), kg/lbs unit toggle, history sync (opcodes `0xD3`/`0xD4`).
+
+---
+
+## ⚠️  DO NOT SEND — opcode `0x27`
+
+Sending the packet `FF 04 27 EC` (opcode `0x27`, no payload) **knocks the dumbbell offline temporarily**: the device immediately disconnects, refuses reconnection attempts, and disappears from BLE scans. It self-recovers after some delay and accepts connections normally again. The recovery delay has only been observed indirectly (the device was reachable again after ~45 minutes of inactivity); the actual lockout could be much shorter and has not been measured.
+
+The exact effect is unknown — most likely candidates are: entering DFU/firmware-update mode (with a timeout), entering a deep-sleep state, or a soft-fault that requires watchdog recovery. The original JaxJox app contains a method `FitnessManager.k1()` that sends this packet, but the method has no callers in any app code path we can find — it's effectively dead code. **It must never be called from any client implementation.**
+
+If a user accidentally triggers this: leave the dumbbell alone and try again after a few minutes. Don't power-cycle; recovery is automatic.
+
+**TODO**: measure the actual recovery time experimentally so we can report it precisely.
 
 ---
 
@@ -11,15 +23,28 @@ Reverse-engineered from decompiled `com.jaxjox.mobile` v3.1.0 APK. All paths bel
 All confirmed in `com/android/jaxjox/fitness/FitnessManager.java:143-155`.
 
 ### Custom JaxJox service
-| Role | UUID |
-|------|------|
-| Service | `AAE28F00-71B5-42A1-8C3C-F9CF6AC969D0` |
-| RX (notify, device → app) | `AAE28F01-71B5-42A1-8C3C-F9CF6AC969D0` |
-| TX (write, app → device) | `AAE28F02-71B5-42A1-8C3C-F9CF6AC969D0` |
+| Role | UUID | Properties |
+|------|------|------------|
+| Service | `AAE28F00-71B5-42A1-8C3C-F9CF6AC969D0` | — |
+| TX (write, app → device) | `AAE28F02-71B5-42A1-8C3C-F9CF6AC969D0` | Write / Write No Response |
+| RX (notify, device → app) | `AAE28F01-71B5-42A1-8C3C-F9CF6AC969D0` | Notify (with CCCD `0x2902`) |
+| Unknown / OEM-reserved | `AAE21541-71B5-42A1-8C3C-F9CF6AC969D0` | Notify (with CCCD `0x2902`) |
+
+The `AAE21541-…` characteristic is exposed by the firmware but **does not appear in the JaxJox app's decompiled sources or in `libfitness.so`**. It's almost certainly a Chileaf OEM-reserved characteristic (DFU/factory/diagnostics) that JaxJox never wired up. Safe to ignore for normal use.
 
 ### Standard services also used
-- Battery Service `0000180F-...` / Battery Level `00002A19-...`
-- Device Information Service `0000180A-...` with Serial / Model / Firmware / Hardware / Software / Manufacturer characteristics
+- **Battery Service** `0000180F-…` / Battery Level `00002A19-…` (Notify + Read; reads as a single byte percentage, e.g. `0x64` = 100%).
+- **Device Information Service** `0000180A-…`:
+  - `0x2A29` Manufacturer Name → ASCII string `chileaf` (the dumbbells are Chileaf-OEM'd hardware; JaxJox is the brand on the box only).
+  - `0x2A24` Model Number → e.g. `DB200`.
+  - `0x2A27` Hardware Revision → e.g. `V1.0`.
+  - `0x2A26` Firmware Revision → e.g. `V1.0`.
+  - `0x2A28` Software Revision → e.g. `V1.1.4db` (the `db` suffix on this user's unit indicates the dumbbell variant).
+  - `0x2A23` System ID → 8-byte vendor-specific identifier.
+
+### Bonding behaviour
+
+The dumbbells **reject OS-level BLE bonding** (`createBond()` returns `BOND_NONE` with reason `AUTH_REJECTED (2)`). This is by design — the device does not implement standard pairing. **GATT writes and notifications work without bonding**, so a client should connect, discover services, enable notifications, and start writing without attempting a bond.
 
 ---
 
@@ -61,13 +86,15 @@ Built in `FitnessManager.f1(byte opcode, byte... payload)` at `FitnessManager.ja
 
 | Opcode | Hex | Name | Payload | Source |
 |--------|-----|------|---------|--------|
-| 0x08 | 8 | Sync timestamp | 4-byte BE epoch-millis | `FitnessManager.java:572-574` |
-| 0xC0 | -64 | Set user account | ASCII username | `FitnessManager.java:432-438` |
+| 0x08 | 8 | Sync timestamp | 4-byte BE epoch-millis (local-as-UTC) | `FitnessManager.java:572-574` |
+| 0xC0 | -64 | Set user account | length-prefixed ASCII username (`[len, ...bytes]`) | `FitnessManager.java:432-438` |
 | 0xD1 | -47 | Query status | (empty) | `FitnessManager.java:529` |
-| 0xD6 | -42 | Set weight | 1 byte (lbs, 8–50 for DumbbellConnect) | `device/dumbbell/DumbBellManager.java:159-161` |
-| 0xFF | -1  | Query device info | hard-coded `[-1, 4, 39, csum]` | `FitnessManager.java:580-587` |
+| 0xD6 | -42 | Set weight | 1 byte: weight **index** 0–7 (NOT lbs) | `device/dumbbell/DumbBellManager.java:159-161` |
+| **0x27** | **39** | **⚠️ DANGEROUS — DO NOT SEND** | (empty) — see warning at top of doc | `FitnessManager.java:580-587` (`k1()`, dead code) |
 
-The kg/lbs toggle opcode was not located in static analysis — see §7.
+Notes:
+- Set-user-account (`0xC0`) requires the username to be length-prefixed in the payload — i.e. payload bytes are `[len, ...username_bytes]`. The original APK builds this via `HexUtil.a((byte) bytes.length, bytes)`.
+- The kg/lbs toggle opcode was not located in static analysis — see §7.
 
 ### Set-weight specifics
 
@@ -76,7 +103,42 @@ The kg/lbs toggle opcode was not located in static analysis — see §7.
 f1((byte) -42, (byte) weight);
 ```
 
-Weight is encoded as a single unsigned byte in the device's display unit (lbs). Range based on product specs: 8–50 lbs. The device fires response opcode `0xD2` (210) once weight is reached.
+The original Java field name `weight` is misleading — runtime testing on `DB200-0161997` confirmed **the byte is a weight-step index, not a value in pounds**. Valid range is **0–7**, mapping to the eight DumbbellConnect settings:
+
+| Index | Weight (lbs) | Set-weight packet |
+|-------|--------------|-------------------|
+| 0 | 8 | `FF 05 D6 00 1C` |
+| 1 | 14 | `FF 05 D6 01 1F` |
+| 2 | 20 | `FF 05 D6 02 1E` |
+| 3 | 26 | `FF 05 D6 03 19` |
+| 4 | 32 | `FF 05 D6 04 18` |
+| 5 | 38 | `FF 05 D6 05 1B` |
+| 6 | 44 | `FF 05 D6 06 1A` |
+| 7 | 50 | `FF 05 D6 07 25` |
+
+(Lbs values are JaxJox's published weight steps and match observed motion; explicit display readings still TODO.)
+
+#### Response semantics
+
+Immediately after writing a `0xD6` packet, the device sends back a 5-byte status frame on RX:
+
+| Response | Meaning |
+|----------|---------|
+| `FF 05 D6 00 1C` | Command accepted, motor starting |
+| `FF 05 D6 01 1F` | Rejected (index out of range, i.e. ≥ 8) |
+
+The status byte is **not** an echo of the requested index — it is `0x00` (ACK) or `0x01` (NACK). This caused early confusion when we tested `0xD6 00`, since the request and the ACK frame happen to coincide byte-for-byte.
+
+#### Physical motion side-effects (on success)
+
+A successful set-weight produces this notification sequence on RX over ~1.5 s:
+
+1. `FF 05 D6 00 1C` — immediate ACK
+2. Two identical `FF 0A D1 00 <idx> 64 0C 64 00 <csum>` packets — motor-start broadcast (`byte 6 = 0x0C`)
+3. The `0xD2` 1 Hz broadcast updates: byte 11 changes from old index to new index
+4. After motion settles: one `FF 0A D1 00 <idx> 64 04 64 00 <csum>` packet — motor-settle broadcast (`byte 6 = 0x04`)
+
+This means a client **does not need to poll** to know when motion completes — wait for the `0x04`-flavoured `0xD1` push.
 
 ---
 
@@ -86,10 +148,67 @@ Parsed in `device/dumbbell/DumbBellReceivedDataCallback.java:28-66`. The first 3
 
 | Opcode (response) | Meaning | Layout |
 |-------------------|---------|--------|
-| 209 (0xD1) | Status update | 6 single bytes at offsets 3..8. Individual byte semantics (current weight, unit, battery, motor state…) unknown; verify by experiment. |
-| 210 (0xD2) | Set-weight ack | bytes at offsets 3 (1B), 4 (3B), 7 (1B), 8 (3B), 11 (1B), 12 (2B). |
-| 211 (0xD3) | History chunk | Buffered; multiple may arrive. |
-| 212 (0xD4) | History complete | Triggers parse of all buffered 211 chunks. Each entry is 12 bytes: type(1) / timestamp(4 BE) / data(3) / data(1) / data(3). Decompression via obfuscated `o1()`. |
+| 192 (0xC0) | Reply to set-user-account | Length 19. Echoes back device serial + accepted username. |
+| 209 (0xD1) | Two roles: explicit query reply, OR motor-state push | Length 10. 6 single bytes at offsets 3..8. See below. |
+| 210 (0xD2) | Periodic state broadcast (~1 Hz, unsolicited) | Length 16. Fields at offsets 3 (1B), 4 (3B), 7 (1B), 8 (3B), 11 (1B), 12 (2B). **Byte 11 = current weight index (0–7).** |
+| 211 (0xD3) | History chunk | Buffered; multiple may arrive. (Untested at runtime.) |
+| 212 (0xD4) | History complete | Triggers parse of all buffered 211 chunks. Each entry is 12 bytes: type(1) / timestamp(4 BE) / data(3) / data(1) / data(3). Decompression via obfuscated `o1()`. (Untested at runtime.) |
+| 214 (0xD6) | Set-weight result (status, not echo) | Length 5. 1-byte payload at offset 3: `0x00` = accepted, `0x01` = rejected. Not parsed by the original app's switch — the app waits for the next `0xD2` broadcast to update its UI. |
+
+### `0xD1` byte semantics
+
+The same opcode is used for two different things — explicit replies to `0xD1` queries, and unsolicited motor-state pushes that fire when the dumbbell physically transitions. Both are parsed by the same handler (six single bytes at offsets 3–8).
+
+| Byte | Meaning | Notes |
+|------|---------|-------|
+| 3 | Always `0x00` so far | Possibly reserved / device subtype |
+| 4 | **Current/target weight index** (0–7) | Matches `0xD2` byte 11 |
+| 5 | Unknown | `0x43` (67) seen in query response, `0x64` (100) in motor pushes — possibly differs by event source |
+| 6 | **Motion state** | `0x0C` = motor active / motion starting; `0x04` = motor idle / settled. Other values seen in query response (`0x07`). |
+| 7 | **Battery percentage** | `0x64` = 100%. Matches Battery Service value. |
+| 8 | Always `0x00` so far | Possibly reserved |
+
+### Observed examples
+
+Captured from `DB200-0161997` (FW V1.0, SW V1.1.4db):
+
+```
+FF 10 D2 00 00 00 00 00 00 00 00 01 00 00 00 24   ← periodic broadcast, ~1 Hz, idle at index 1 (14 lbs)
+FF 0A D1 00 01 43 07 64 00 4D                      ← reply to FF 04 D1 16 (explicit query)
+FF 05 D6 00 1C                                     ← ACK to a successful set-weight (any valid index 0–7)
+FF 05 D6 01 1F                                     ← NACK to an out-of-range set-weight (index ≥ 8)
+
+After successful FF 05 D6 03 19 (move to 26 lbs):
+    FF 05 D6 00 1C                                 ← ACK
+    FF 0A D1 00 03 64 0C 64 00 75                  ← motor-start push (×2, identical)
+    FF 0A D1 00 03 64 0C 64 00 75
+    FF 10 D2 00 00 00 00 00 00 00 00 03 00 00 00 26  ← D2 broadcast updates byte 11 → 03
+    FF 0A D1 00 03 64 04 64 00 6D                  ← motor-settle push (~1.5s after start)
+```
+
+Moving the weights, by index:
+
+```
+  - FF 05 D6 00 1C — index 0  (least weight: 8 lbs)
+  - FF 05 D6 01 1F — index 1
+  - FF 05 D6 02 1E — index 2             
+  - FF 05 D6 03 19 — index 3
+  - FF 05 D6 04 18 — index 4
+  - FF 05 D6 05 1B — index 5
+  - FF 05 D6 06 1A — index 6
+  - FF 05 D6 07 25 — index 7
+```
+
+Sample response for setting an index, including invalid ones:
+
+```
+  sent FF 05 D6 02 1E    received FF 05 D6 00 1C   ← response payload = 0x00 (success)
+  sent FF 05 D6 03 19    received FF 05 D6 00 1C   ← response payload = 0x00 (success)
+  sent FF 05 D6 07 25    received FF 05 D6 00 1C   ← response payload = 0x00 (success)
+  sent FF 05 D6 08 24    received FF 05 D6 01 1F   ← response payload = 0x01 (rejected)
+  sent FF 05 D6 0A 26    received FF 05 D6 01 1F   ← response payload = 0x01 (rejected)
+  sent FF 05 D6 0F 2D    received FF 05 D6 01 1F   ← response payload = 0x01 (rejected)
+```
 
 ---
 
