@@ -279,7 +279,7 @@ void main() {
 
     test(
         'fired during an in-flight add(): the racing dumbbell is disconnected '
-        'and add() rejects with StateError instead of returning an orphan',
+        'via disconnectAll\'s snapshot iteration; the membership ends empty',
         () async {
       final fakes = <FakeDumbbell>[];
       final group = WeightGroup(newDumbbell: (d) {
@@ -296,18 +296,20 @@ void main() {
       await pumpEventQueue();
       expect(group.dumbbells, hasLength(1));
 
-      // Tear down while connect is still pending.
+      // Tear down while connect is still pending. disconnectAll's snapshot
+      // captures the in-flight dumbbell and calls Dumbbell.disconnect on
+      // it directly — no special-case needed in WeightGroup.add.
       final disconnectFuture = group.disconnectAll();
+      await pumpEventQueue();
+      expect(fakes.single.disconnectCalled, isTrue);
 
-      // Now release the connect. add()'s post-await recheck should detect
-      // that the group is disposed, disconnect the new dumbbell, and throw.
+      // Releasing the connect lets both futures resolve.
       fakes.single.completeConnect();
-
-      await expectLater(addFuture, throwsA(isA<StateError>()));
+      await addFuture; // resolves successfully — the dumbbell handled itself
       await disconnectFuture;
 
-      // Either disconnectAll's snapshot or add()'s recheck must have called
-      // disconnect on the in-flight dumbbell — no orphan BLE connection.
+      // No orphan: membership cleared, dumbbell disconnected.
+      expect(group.dumbbells, isEmpty);
       expect(fakes.single.disconnectCalled, isTrue);
     });
   });

@@ -38,11 +38,13 @@ class WeightGroup {
   /// added to the membership immediately (so the UI can render a "connecting"
   /// card) and removed if [Dumbbell.connect] throws.
   ///
-  /// Throws [StateError] if the group is already disposed, or if it becomes
-  /// disposed while `connect()` is in flight — the latter case can happen
-  /// when the containing screen pops while a connect is still pending.
-  /// In that case the new dumbbell is also disconnected before throwing,
-  /// so no orphaned BLE connection is left behind.
+  /// Throws [StateError] if the group is already disposed — guards against a
+  /// real leak (a brand-new dumbbell would otherwise connect to BLE with no
+  /// owner). The mid-flight case (group disposed while `connect()` is in
+  /// flight) is handled by the dumbbell itself: [disconnectAll] captures the
+  /// in-flight member in its snapshot and calls `Dumbbell.disconnect`, which
+  /// flips the dumbbell's own `_disposed` flag and tears down BLE on the
+  /// next `connect()` await checkpoint. Idempotent.
   Future<Dumbbell> add(BluetoothDevice device) async {
     if (_disposed) {
       throw StateError('WeightGroup is disposed');
@@ -52,14 +54,6 @@ class WeightGroup {
     _emit();
     try {
       await db.connect();
-      if (_disposed) {
-        // disconnectAll ran during our await. Make sure this dumbbell is
-        // torn down even if disconnectAll's own iteration over a snapshot
-        // missed cleaning it up (Dumbbell.disconnect is idempotent so
-        // double-disconnect is safe).
-        await db.disconnect();
-        throw StateError('WeightGroup was disposed during connect');
-      }
       return db;
     } catch (e) {
       _dumbbells.remove(db);
