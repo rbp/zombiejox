@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zombiejox/devices/dumbbell.dart';
@@ -20,24 +22,43 @@ class FakeDumbbell extends Dumbbell {
   bool failConnect = false;
   Object connectError = StateError('fake connect failure');
 
+  /// If set, `connect()` awaits this completer before returning. Lets a test
+  /// hold a connect open while exercising other operations on the group.
+  Completer<void>? _connectGate;
+
   final List<int> setWeightCalls = [];
   bool failSetWeight = false;
   Object setWeightError = StateError('fake set-weight failure');
 
   bool disconnectCalled = false;
 
+  /// Mirror the real `Dumbbell.isReady` semantics: false after disconnect.
   @override
-  bool get isReady => _ready;
+  bool get isReady => !disconnectCalled && _ready;
 
   /// Simulate the dumbbell becoming ready (state has arrived).
   void becomeReady() {
     _ready = true;
   }
 
+  /// Hold `connect()` open until [completeConnect] is called.
+  void delayConnect() {
+    _connectGate = Completer<void>();
+  }
+
+  void completeConnect() {
+    final c = _connectGate;
+    _connectGate = null;
+    c?.complete();
+  }
+
   @override
   Future<void> connect() async {
     connectCalled = true;
     if (failConnect) throw connectError;
+    if (_connectGate != null) {
+      await _connectGate!.future;
+    }
     if (startsReady) _ready = true;
   }
 
@@ -254,6 +275,51 @@ void main() {
       await group.disconnectAll();
       // A second call should be a quiet no-op (does not double-close streams).
       await expectLater(group.disconnectAll(), completes);
+    });
+
+    test(
+        'fired during an in-flight add(): the racing dumbbell is disconnected '
+        'and add() rejects with StateError instead of returning an orphan',
+        () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d);
+        // Hold connect open so we can trigger disconnectAll mid-flight.
+        f.delayConnect();
+        fakes.add(f);
+        return f;
+      });
+
+      // Start an add() but don't await — yields the loop so the dumbbell
+      // gets pushed into the membership list before we tear down.
+      final addFuture = group.add(_device('AA:01'));
+      await pumpEventQueue();
+      expect(group.dumbbells, hasLength(1));
+
+      // Tear down while connect is still pending.
+      final disconnectFuture = group.disconnectAll();
+
+      // Now release the connect. add()'s post-await recheck should detect
+      // that the group is disposed, disconnect the new dumbbell, and throw.
+      fakes.single.completeConnect();
+
+      await expectLater(addFuture, throwsA(isA<StateError>()));
+      await disconnectFuture;
+
+      // Either disconnectAll's snapshot or add()'s recheck must have called
+      // disconnect on the in-flight dumbbell — no orphan BLE connection.
+      expect(fakes.single.disconnectCalled, isTrue);
+    });
+  });
+
+  group('add() after disposal', () {
+    test('throws StateError immediately', () async {
+      final group = WeightGroup(newDumbbell: (d) => FakeDumbbell(d));
+      await group.disconnectAll();
+      await expectLater(
+        group.add(_device('AA:01')),
+        throwsA(isA<StateError>()),
+      );
     });
   });
 }
