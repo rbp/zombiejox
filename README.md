@@ -38,15 +38,15 @@ If you have one of the untested devices and want to help, open an issue.
 
 ## What it does
 
-- Scans for and connects to a DumbbellConnect (`DB200`) over BLE
-- Adjusts the weight remotely — all eight settings (8 / 14 / 20 / 26 / 32 / 38 / 44 / 50 lbs)
-- Shows live status: current weight, battery, motion state
+- Scans for and connects to one or more DumbbellConnect (`DB200`) devices over BLE
+- Connects to the whole pair (or any number) in one trip — tick each in the scan list, hit "Connect (N)"
+- Adjusts the weight remotely — all eight settings (8 / 14 / 20 / 26 / 32 / 38 / 44 / 50 lbs); a single tap sets every connected dumbbell at once
+- Shows live status per dumbbell: current weight, battery, motion state
 - Reflects manual weight changes (set via the dock's own buttons) in the UI
 
 ## What it doesn't do (yet)
 
-- Control multiple dumbbells at once (the plumbing is in; the multi-select UI is the next branch)
-- kg display / unit toggle
+- Manual kg/lbs toggle (the buttons default to your locale — kg outside US/UK; no in-app override yet)
 - Remember devices between launches / auto-reconnect
 - Pre-permission rationale + edge-case screens (Bluetooth-off, permission-denied, out-of-range)
 - Settings / About screens
