@@ -1,13 +1,12 @@
-/// Index ↔ display-weight lookup.
-///
-/// `0xD6 <index>` is the BLE set-weight command. The dumbbell's hardware
-/// supports 8 settings (indices 0..7); see `docs/ble_protocol.md` §4.
-///
-/// `kWeightLbsByIndex` is the canonical hardware fact (what JaxJox put on
-/// the box for the lbs SKU). `kWeightKgByIndex` is the exact lb→kg conversion
-/// to one decimal place — the kg SKU's own display rounding has not been
-/// independently verified yet (see TODO in `docs/ble_protocol.md` §2g).
-library;
+// Index ↔ display-weight lookup.
+//
+// `0xD6 <index>` is the BLE set-weight command. The dumbbell's hardware
+// supports 8 settings (indices 0..7); see `docs/ble_protocol.md` §4.
+//
+// `kWeightLbsByIndex` is the canonical hardware fact (what JaxJox put on
+// the box for the lbs SKU). `kWeightKgByIndex` is the exact lb→kg conversion
+// to one decimal place — the kg SKU's own display rounding has not been
+// independently verified yet (see TODO in `docs/ble_protocol.md` §2g).
 
 const List<int> kWeightLbsByIndex = [8, 14, 20, 26, 32, 38, 44, 50];
 

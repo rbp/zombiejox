@@ -83,12 +83,15 @@ class _ControlScreenState extends State<ControlScreen> {
 
   @override
   void dispose() {
-    _changesSub?.cancel();
+    // dispose() can't be async, so each Future is explicitly fire-and-forget
+    // via `unawaited`. cancel() / disconnectAll() can't meaningfully fail in
+    // a way the user can recover from; we just need to release resources.
+    unawaited(_changesSub?.cancel() ?? Future<void>.value());
     for (final s in _stateSubs.values) {
-      s.cancel();
+      unawaited(s.cancel());
     }
     _stateSubs.clear();
-    _group.disconnectAll();
+    unawaited(_group.disconnectAll());
     super.dispose();
   }
 

@@ -27,14 +27,15 @@ class Preferences {
     return _localeDefaultUnit();
   }
 
-  Future<void> setUnit(WeightUnit unit) =>
-      _prefs.setString(_keyUnit, unit.name);
+  Future<void> setUnit(WeightUnit unit) async {
+    await _prefs.setString(_keyUnit, unit.name);
+  }
 }
 
 WeightUnit _localeDefaultUnit() {
-  // The three remaining lbs-using countries in 2026: US, UK, Liberia, Myanmar.
-  // (UK is mixed in practice but bodyweight + dumbbell weight is still
-  //  routinely quoted in lbs.) Default to kg everywhere else.
+  // Countries that still routinely quote bodyweight / dumbbell weight in lbs:
+  // US, UK (mixed in practice but lbs for fitness), Liberia, Myanmar.
+  // Default to kg everywhere else.
   const lbsCountries = {'US', 'GB', 'LR', 'MM'};
   final country = PlatformDispatcher.instance.locale.countryCode?.toUpperCase();
   if (country != null && lbsCountries.contains(country)) {

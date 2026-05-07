@@ -70,8 +70,9 @@ class WeightGroup {
   /// while any member is still connecting); this filter is a defence-in-depth
   /// layer so a stray fast tap during the connect window doesn't crash.
   ///
-  /// Errors from ready members are not swallowed — the future completes with
-  /// the first error if any member fails.
+  /// Errors are not swallowed: the returned future waits for every ready
+  /// member's write to complete (success or failure) and then surfaces the
+  /// first error if any member failed (standard `Future.wait` semantics).
   Future<void> setWeightIndex(int index) {
     final ready = [
       for (final d in _dumbbells)
