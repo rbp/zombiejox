@@ -5,10 +5,13 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../ble/uuids.dart';
-import 'dumbbell_screen.dart';
+import '../state/preferences.dart';
+import 'control_screen.dart';
 
 class ScanScreen extends StatefulWidget {
-  const ScanScreen({super.key});
+  final Preferences preferences;
+
+  const ScanScreen({super.key, required this.preferences});
 
   @override
   State<ScanScreen> createState() => _ScanScreenState();
@@ -56,7 +59,12 @@ class _ScanScreenState extends State<ScanScreen> {
     await FlutterBluePlus.stopScan();
     if (!mounted) return;
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => DumbbellScreen(device: device)),
+      MaterialPageRoute(
+        builder: (_) => ControlScreen(
+          devices: [device],
+          preferences: widget.preferences,
+        ),
+      ),
     );
     if (mounted) _startScan();
   }
@@ -89,7 +97,8 @@ class _ScanScreenState extends State<ScanScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Bluetooth permission is required to find your dumbbells.'),
+                const Text(
+                    'Bluetooth permission is required to find your dumbbells.'),
                 const SizedBox(height: 16),
                 FilledButton(
                   onPressed: _ensurePermissions,

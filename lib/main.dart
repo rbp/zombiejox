@@ -1,13 +1,18 @@
 import 'package:flutter/material.dart';
 
 import 'screens/scan_screen.dart';
+import 'state/preferences.dart';
 
-void main() {
-  runApp(const ZombieJoxApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final prefs = await Preferences.load();
+  runApp(ZombieJoxApp(preferences: prefs));
 }
 
 class ZombieJoxApp extends StatelessWidget {
-  const ZombieJoxApp({super.key});
+  final Preferences preferences;
+
+  const ZombieJoxApp({super.key, required this.preferences});
 
   @override
   Widget build(BuildContext context) {
@@ -17,7 +22,7 @@ class ZombieJoxApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const ScanScreen(),
+      home: ScanScreen(preferences: preferences),
     );
   }
 }

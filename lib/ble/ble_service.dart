@@ -12,10 +12,12 @@ class BleConnection {
   late BluetoothCharacteristic _rx;
 
   StreamSubscription<List<int>>? _rxSub;
-  final StreamController<List<int>> _rxController = StreamController.broadcast();
+  final StreamController<List<int>> _rxController =
+      StreamController.broadcast();
 
   Stream<List<int>> get rxStream => _rxController.stream;
-  Stream<BluetoothConnectionState> get connectionState => device.connectionState;
+  Stream<BluetoothConnectionState> get connectionState =>
+      device.connectionState;
 
   BleConnection(this.device);
 
@@ -28,7 +30,8 @@ class BleConnection {
     final services = await device.discoverServices();
     final svc = services.firstWhere(
       (s) => s.uuid.str.toLowerCase() == JaxJoxUuids.service,
-      orElse: () => throw StateError('JaxJox service not found on ${device.remoteId}'),
+      orElse: () =>
+          throw StateError('JaxJox service not found on ${device.remoteId}'),
     );
     _tx = svc.characteristics.firstWhere(
       (c) => c.uuid.str.toLowerCase() == JaxJoxUuids.txCharacteristic,
@@ -47,9 +50,13 @@ class BleConnection {
 
   Future<int?> readBatteryLevel() async {
     final services = await device.discoverServices();
-    final svc = services.where((s) => s.uuid.str.toLowerCase() == JaxJoxUuids.batteryService).firstOrNull;
+    final svc = services
+        .where((s) => s.uuid.str.toLowerCase() == JaxJoxUuids.batteryService)
+        .firstOrNull;
     if (svc == null) return null;
-    final c = svc.characteristics.where((c) => c.uuid.str.toLowerCase() == JaxJoxUuids.batteryLevel).firstOrNull;
+    final c = svc.characteristics
+        .where((c) => c.uuid.str.toLowerCase() == JaxJoxUuids.batteryLevel)
+        .firstOrNull;
     if (c == null) return null;
     final v = await c.read();
     return v.isEmpty ? null : v.first;

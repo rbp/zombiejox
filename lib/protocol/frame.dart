@@ -25,5 +25,6 @@ ParsedFrame? parseFrame(List<int> bytes) {
   if (length != bytes.length) return null;
   final pre = bytes.sublist(0, bytes.length - 1);
   if (jaxjoxChecksum(pre) != bytes.last) return null;
-  return ParsedFrame(bytes[2], Uint8List.fromList(bytes.sublist(3, bytes.length - 1)));
+  return ParsedFrame(
+      bytes[2], Uint8List.fromList(bytes.sublist(3, bytes.length - 1)));
 }

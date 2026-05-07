@@ -8,7 +8,8 @@ class JaxJoxUuids {
 
   static const String batteryService = '0000180f-0000-1000-8000-00805f9b34fb';
   static const String batteryLevel = '00002a19-0000-1000-8000-00805f9b34fb';
-  static const String deviceInformationService = '0000180a-0000-1000-8000-00805f9b34fb';
+  static const String deviceInformationService =
+      '0000180a-0000-1000-8000-00805f9b34fb';
 }
 
 /// Advertised-name prefixes by product. Filter scan results to these.

@@ -10,6 +10,7 @@ import '../protocol/opcodes.dart';
 /// Drives a single DumbbellConnect (`DB200`) device.
 class Dumbbell {
   final BleConnection _ble;
+  final BluetoothDevice device;
 
   final StreamController<DumbbellState> _states =
       StreamController<DumbbellState>.broadcast();
@@ -22,7 +23,7 @@ class Dumbbell {
 
   StreamSubscription<List<int>>? _rxSub;
 
-  Dumbbell(BluetoothDevice device) : _ble = BleConnection(device);
+  Dumbbell(this.device) : _ble = BleConnection(device);
 
   Future<void> connect() async {
     await _ble.connect();

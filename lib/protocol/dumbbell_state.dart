@@ -1,8 +1,6 @@
+import '../state/weights.dart';
 import 'frame.dart';
 import 'opcodes.dart';
-
-/// 0–7 → published JaxJox weight steps in pounds. See `docs/ble_protocol.md` §4.
-const List<int> kWeightLbsByIndex = [8, 14, 20, 26, 32, 38, 44, 50];
 
 /// `0xD1` byte 6 — motor active. `0x04` is "settled"; other values (e.g. `0x07`
 /// in a query reply) mean the same thing for our purposes — not actively moving.
@@ -20,9 +18,12 @@ class DumbbellState {
     this.batteryPct,
   });
 
+  /// Convenience: current weight in pounds. Use [formatWeight] from
+  /// `state/weights.dart` if you need a unit-aware display string.
   int get weightLbs => kWeightLbsByIndex[weightIndex];
 
-  DumbbellState copyWith({int? weightIndex, bool? motorActive, int? batteryPct}) =>
+  DumbbellState copyWith(
+          {int? weightIndex, bool? motorActive, int? batteryPct}) =>
       DumbbellState(
         weightIndex: weightIndex ?? this.weightIndex,
         motorActive: motorActive ?? this.motorActive,
@@ -37,7 +38,7 @@ DumbbellState? applyFrame(DumbbellState? prev, ParsedFrame frame) {
     case Opcodes.queryStatus: // 0xD1 — query reply or motor-state push
       if (frame.payload.length < 6) return prev;
       final idx = frame.payload[1];
-      if (idx < 0 || idx >= kWeightLbsByIndex.length) return prev;
+      if (idx < 0 || idx >= kJaxJoxWeightCount) return prev;
       final motion = frame.payload[3];
       final battery = frame.payload[4];
       return DumbbellState(
@@ -48,7 +49,7 @@ DumbbellState? applyFrame(DumbbellState? prev, ParsedFrame frame) {
     case Opcodes.stateBroadcast: // 0xD2 — periodic ~1 Hz
       if (frame.payload.length < 9) return prev;
       final idx = frame.payload[8]; // payload offset 8 == frame byte 11
-      if (idx < 0 || idx >= kWeightLbsByIndex.length) return prev;
+      if (idx < 0 || idx >= kJaxJoxWeightCount) return prev;
       return (prev ?? const DumbbellState(weightIndex: 0, motorActive: false))
           .copyWith(weightIndex: idx);
     default:
