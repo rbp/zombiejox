@@ -69,6 +69,8 @@ Google Play won't host an unofficial app for orphaned hardware.
 
 Or build from source:
 
+First time setting up Flutter for this project on macOS? See [FLUTTER.md](FLUTTER.md) for the Android toolchain walkthrough (JDK, command-line Android SDK, license acceptance, common gotchas).
+
 ## Build from source
 
 ```bash
