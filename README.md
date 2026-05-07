@@ -38,15 +38,21 @@ If you have one of the untested devices and want to help, open an issue.
 
 ## What it does
 
-- Nothing, really. Early days...
-
+- Scans for and connects to one or more DumbbellConnect (`DB200`) devices over BLE
+- Connects to the whole pair (or any number) in one trip — tick each in the scan list, hit "Connect (N)"
+- Adjusts the weight remotely — all eight settings (8 / 14 / 20 / 26 / 32 / 38 / 44 / 50 lbs); a single tap sets every connected dumbbell at once
+- Shows live status per dumbbell: current weight, battery, motion state
+- Reflects manual weight changes (set via the dock's own buttons) in the UI
 
 ## What it doesn't do (yet)
 
-- Scans for and connects to your JaxJox device over BLE
-- Sets weight remotely (8–50 lbs on dumbbells)
-- Reads current weight, battery, firmware version
-- Works on both Android and iOS
+- Manual kg/lbs toggle (the buttons default to your locale — kg outside US/UK; no in-app override yet)
+- Remember devices between launches / auto-reconnect
+- Pre-permission rationale + edge-case screens (Bluetooth-off, permission-denied, out-of-range)
+- Settings / About screens
+- Connect to KettlebellConnect, FoamRollerConnect, or Chileaf HRMs
+- Run verified on iOS (the scaffold exists; not yet tested on a real iPhone)
+- Have its own app icon (still showing the default Flutter logo)
 
 ## What it wil never do
 
@@ -63,6 +69,8 @@ Google Play won't host an unofficial app for orphaned hardware.
 
 Or build from source:
 
+First time setting up Flutter for this project on macOS? See [FLUTTER.md](FLUTTER.md) for the Android toolchain walkthrough (JDK, command-line Android SDK, license acceptance, common gotchas).
+
 ## Build from source
 
 ```bash
@@ -71,6 +79,13 @@ cd zombiejox
 flutter pub get
 flutter run
 ```
+
+## Contributing
+
+PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the conventions —
+short version: AI-assisted contributions are fine if you understand and
+verify them, hardware-touching changes need an on-device test, and `main`
+always works.
 
 ## How it works
 

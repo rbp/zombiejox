@@ -5,10 +5,13 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../ble/uuids.dart';
-import 'dumbbell_screen.dart';
+import '../state/preferences.dart';
+import 'control_screen.dart';
 
 class ScanScreen extends StatefulWidget {
-  const ScanScreen({super.key});
+  final Preferences preferences;
+
+  const ScanScreen({super.key, required this.preferences});
 
   @override
   State<ScanScreen> createState() => _ScanScreenState();
@@ -17,6 +20,7 @@ class ScanScreen extends StatefulWidget {
 class _ScanScreenState extends State<ScanScreen> {
   bool _permissionsGranted = false;
   bool _checking = true;
+  final Set<BluetoothDevice> _selected = <BluetoothDevice>{};
 
   @override
   void initState() {
@@ -52,13 +56,32 @@ class _ScanScreenState extends State<ScanScreen> {
     );
   }
 
-  Future<void> _onTapDevice(BluetoothDevice device) async {
+  void _toggleSelected(BluetoothDevice device) {
+    setState(() {
+      if (_selected.contains(device)) {
+        _selected.remove(device);
+      } else {
+        _selected.add(device);
+      }
+    });
+  }
+
+  Future<void> _onConnect() async {
+    if (_selected.isEmpty) return;
+    final devices = _selected.toList();
     await FlutterBluePlus.stopScan();
     if (!mounted) return;
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => DumbbellScreen(device: device)),
+      MaterialPageRoute(
+        builder: (_) => ControlScreen(
+          devices: devices,
+          preferences: widget.preferences,
+        ),
+      ),
     );
-    if (mounted) _startScan();
+    if (!mounted) return;
+    setState(_selected.clear);
+    _startScan();
   }
 
   @override
@@ -89,7 +112,8 @@ class _ScanScreenState extends State<ScanScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Bluetooth permission is required to find your dumbbells.'),
+                const Text(
+                    'Bluetooth permission is required to find your dumbbells.'),
                 const SizedBox(height: 16),
                 FilledButton(
                   onPressed: _ensurePermissions,
@@ -121,29 +145,76 @@ class _ScanScreenState extends State<ScanScreen> {
           ),
         ],
       ),
-      body: StreamBuilder<List<ScanResult>>(
-        stream: FlutterBluePlus.scanResults,
-        initialData: const [],
-        builder: (context, snap) {
-          final results = (snap.data ?? const <ScanResult>[])
-              .where((r) => _isJaxJox(r.advertisementData.advName))
-              .toList();
-          if (results.isEmpty) {
-            return const Center(child: Text('Scanning for JaxJox devices…'));
-          }
-          return ListView.builder(
-            itemCount: results.length,
-            itemBuilder: (_, i) {
-              final r = results[i];
-              return ListTile(
-                title: Text(r.advertisementData.advName),
-                subtitle: Text('${r.device.remoteId}  •  RSSI ${r.rssi}'),
-                onTap: () => _onTapDevice(r.device),
-              );
-            },
-          );
-        },
+      body: Column(
+        children: [
+          Expanded(
+            child: StreamBuilder<List<ScanResult>>(
+              stream: FlutterBluePlus.scanResults,
+              initialData: const [],
+              builder: (context, snap) {
+                final results = (snap.data ?? const <ScanResult>[])
+                    .where((r) => _isJaxJox(r.advertisementData.advName))
+                    .toList();
+                return ScanResultsList(
+                  results: results,
+                  selected: _selected,
+                  onToggle: _toggleSelected,
+                );
+              },
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _selected.isEmpty ? null : _onConnect,
+                  child: Text(_selected.isEmpty
+                      ? 'Connect'
+                      : 'Connect (${_selected.length})'),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+/// Renders the live list of scan results with a checkbox per row. Pure UI:
+/// owns no state, doesn't talk to FlutterBluePlus, and is what tests pump.
+@visibleForTesting
+class ScanResultsList extends StatelessWidget {
+  final List<ScanResult> results;
+  final Set<BluetoothDevice> selected;
+  final ValueChanged<BluetoothDevice> onToggle;
+
+  const ScanResultsList({
+    super.key,
+    required this.results,
+    required this.selected,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (results.isEmpty) {
+      return const Center(child: Text('Scanning for JaxJox devices…'));
+    }
+    return ListView.builder(
+      itemCount: results.length,
+      itemBuilder: (_, i) {
+        final r = results[i];
+        return CheckboxListTile(
+          value: selected.contains(r.device),
+          onChanged: (_) => onToggle(r.device),
+          title: Text(r.advertisementData.advName),
+          subtitle: Text('${r.device.remoteId}  •  RSSI ${r.rssi}'),
+        );
+      },
     );
   }
 }

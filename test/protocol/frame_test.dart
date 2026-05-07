@@ -22,7 +22,8 @@ void main() {
     });
 
     test('query-status frame is FF 04 D1 16', () {
-      expect(buildFrame(Opcodes.queryStatus, const []), [0xFF, 0x04, 0xD1, 0x16]);
+      expect(
+          buildFrame(Opcodes.queryStatus, const []), [0xFF, 0x04, 0xD1, 0x16]);
     });
   });
 
@@ -50,7 +51,8 @@ void main() {
 
   group('applyFrame / DumbbellState', () {
     test('decodes a settled motor-state push (docs §5)', () {
-      final frame = parseFrame([0xFF, 0x0A, 0xD1, 0x00, 0x03, 0x64, 0x04, 0x64, 0x00, 0x6D]);
+      final frame = parseFrame(
+          [0xFF, 0x0A, 0xD1, 0x00, 0x03, 0x64, 0x04, 0x64, 0x00, 0x6D]);
       expect(frame, isNotNull);
       final s = applyFrame(null, frame!);
       expect(s, isNotNull);
@@ -61,13 +63,31 @@ void main() {
     });
 
     test('decodes a motor-active push', () {
-      final frame = parseFrame([0xFF, 0x0A, 0xD1, 0x00, 0x03, 0x64, 0x0C, 0x64, 0x00, 0x75]);
+      final frame = parseFrame(
+          [0xFF, 0x0A, 0xD1, 0x00, 0x03, 0x64, 0x0C, 0x64, 0x00, 0x75]);
       final s = applyFrame(null, frame!);
       expect(s!.motorActive, true);
     });
 
     test('0xD2 broadcast updates weight index (docs §5)', () {
-      final frame = parseFrame([0xFF, 0x10, 0xD2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x24]);
+      final frame = parseFrame([
+        0xFF,
+        0x10,
+        0xD2,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        0x24
+      ]);
       final s = applyFrame(null, frame!);
       expect(s!.weightIndex, 1);
       expect(s.weightLbs, 14);
