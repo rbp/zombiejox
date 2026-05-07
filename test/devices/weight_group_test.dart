@@ -9,7 +9,12 @@ import 'package:zombiejox/devices/weight_group.dart';
 /// no I/O at construction; overriding the public methods keeps all tests
 /// hermetic.
 class FakeDumbbell extends Dumbbell {
-  FakeDumbbell(super.device);
+  FakeDumbbell(super.device, {this.startsReady = true});
+
+  /// If true, `connect()` flips [isReady] to true automatically (the common
+  /// case in tests). Set false to simulate a still-connecting dumbbell.
+  final bool startsReady;
+  bool _ready = false;
 
   bool connectCalled = false;
   bool failConnect = false;
@@ -22,9 +27,18 @@ class FakeDumbbell extends Dumbbell {
   bool disconnectCalled = false;
 
   @override
+  bool get isReady => _ready;
+
+  /// Simulate the dumbbell becoming ready (state has arrived).
+  void becomeReady() {
+    _ready = true;
+  }
+
+  @override
   Future<void> connect() async {
     connectCalled = true;
     if (failConnect) throw connectError;
+    if (startsReady) _ready = true;
   }
 
   @override
@@ -130,6 +144,50 @@ void main() {
     test('on an empty group is a no-op (does not throw)', () async {
       final group = WeightGroup(newDumbbell: (d) => FakeDumbbell(d));
       await expectLater(group.setWeightIndex(0), completes);
+    });
+
+    test('skips members that are not yet ready (race during connect window)',
+        () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        // Simulate a dumbbell that's added to the group but whose connect
+        // hasn't completed (and therefore whose TX char isn't initialized).
+        final f = FakeDumbbell(d, startsReady: false);
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      // fakes[0] is now in the group with isReady == false.
+
+      // setWeightIndex during this window must not throw and must not
+      // reach the not-yet-ready dumbbell.
+      await expectLater(group.setWeightIndex(3), completes);
+      expect(fakes[0].setWeightCalls, isEmpty);
+
+      // Once ready, calls go through.
+      fakes[0].becomeReady();
+      await group.setWeightIndex(3);
+      expect(fakes[0].setWeightCalls, [3]);
+    });
+
+    test('with a mix of ready and not-ready members, only ready ones receive',
+        () async {
+      final fakes = <FakeDumbbell>[];
+      var i = 0;
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d, startsReady: i.isEven);
+        i++;
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01')); // ready
+      await group.add(_device('AA:02')); // NOT ready
+      await group.add(_device('AA:03')); // ready
+
+      await group.setWeightIndex(5);
+      expect(fakes[0].setWeightCalls, [5]);
+      expect(fakes[1].setWeightCalls, isEmpty);
+      expect(fakes[2].setWeightCalls, [5]);
     });
 
     test('rethrows when any member fails', () async {

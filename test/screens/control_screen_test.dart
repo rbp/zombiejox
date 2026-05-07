@@ -127,6 +127,75 @@ void main() {
     }
   });
 
+  testWidgets('weight buttons stay disabled until every dumbbell is ready',
+      (tester) async {
+    final prefs = await _freshPrefs();
+    final fakes = <_FakeDumbbell>[];
+    final group = WeightGroup(newDumbbell: (d) {
+      final f = _FakeDumbbell(d);
+      fakes.add(f);
+      return f;
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: ControlScreen(
+        devices: [_device('AA:01'), _device('AA:02')],
+        preferences: prefs,
+        createWeightGroup: () => group,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(fakes, hasLength(2));
+
+    // Initially neither fake has emitted state — every weight button must
+    // be disabled (its onPressed is null) so a fast tap can't reach the
+    // not-yet-connected TX characteristic.
+    final allButtons =
+        tester.widgetList<FilledButton>(find.byType(FilledButton)).toList();
+    expect(allButtons, hasLength(8));
+    for (final b in allButtons) {
+      expect(b.onPressed, isNull,
+          reason: 'every weight button must be disabled before isReady');
+    }
+
+    // Tapping a button while disabled is a no-op — verifies the guard.
+    await tester.tap(find.text('20 lbs'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    for (final f in fakes) {
+      expect(f.setWeightCalls, isEmpty);
+    }
+
+    // Bring one fake ready; buttons must still be disabled because the
+    // *other* one hasn't reported state yet.
+    fakes[0].emitState(
+      const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
+    );
+    await tester.pumpAndSettle();
+    for (final b
+        in tester.widgetList<FilledButton>(find.byType(FilledButton))) {
+      expect(b.onPressed, isNull,
+          reason: 'one ready, one not — buttons must still be disabled');
+    }
+
+    // Bring the second one ready; buttons enable.
+    fakes[1].emitState(
+      const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
+    );
+    await tester.pumpAndSettle();
+    final enabledCount = tester
+        .widgetList<FilledButton>(find.byType(FilledButton))
+        .where((b) => b.onPressed != null)
+        .length;
+    expect(enabledCount, 8, reason: 'all buttons enabled once both ready');
+
+    // And now the tap reaches both fakes.
+    await tester.tap(find.text('14 lbs'));
+    await tester.pumpAndSettle();
+    for (final f in fakes) {
+      expect(f.setWeightCalls, [1]);
+    }
+  });
+
   testWidgets('shows kg labels when preference is kg', (tester) async {
     SharedPreferences.setMockInitialValues({'units': 'kg'});
     final prefs = await Preferences.load();

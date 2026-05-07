@@ -51,14 +51,23 @@ class WeightGroup {
     }
   }
 
-  /// Send `0xD6 <index>` to every connected member in parallel. Errors from
-  /// individual members are not swallowed — the future completes with the
-  /// first error if any member fails.
+  /// Send `0xD6 <index>` to every **ready** member in parallel. Members that
+  /// haven't finished connecting yet (`Dumbbell.isReady == false`) are
+  /// skipped — calling [Dumbbell.setWeightIndex] on a not-yet-connected
+  /// device would throw a `LateInitializationError` on the underlying TX
+  /// characteristic. The UI is the primary guard (it disables weight buttons
+  /// while any member is still connecting); this filter is a defence-in-depth
+  /// layer so a stray fast tap during the connect window doesn't crash.
+  ///
+  /// Errors from ready members are not swallowed — the future completes with
+  /// the first error if any member fails.
   Future<void> setWeightIndex(int index) {
-    if (_dumbbells.isEmpty) return Future.value();
-    return Future.wait([
-      for (final d in _dumbbells) d.setWeightIndex(index),
-    ]);
+    final ready = [
+      for (final d in _dumbbells)
+        if (d.isReady) d
+    ];
+    if (ready.isEmpty) return Future.value();
+    return Future.wait([for (final d in ready) d.setWeightIndex(index)]);
   }
 
   /// Disconnect all members and close the change stream.

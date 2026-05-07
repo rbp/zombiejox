@@ -19,6 +19,17 @@ class Dumbbell {
   DumbbellState? _last;
   DumbbellState? get lastState => _last;
 
+  /// True once the dumbbell has reported any state. Implies `connect()`'s
+  /// `_ble.connect()` step finished successfully (TX/RX characteristics are
+  /// initialized) AND we've received either the post-connect battery read or
+  /// at least one `0xD2`/`0xD1` notification. Use this to gate
+  /// `setWeightIndex()` calls — calling it before this is true would hit a
+  /// `LateInitializationError` on the underlying TX characteristic.
+  ///
+  /// Reads via the public [lastState] getter so subclasses (test fakes) that
+  /// override it are honoured.
+  bool get isReady => lastState != null;
+
   Stream<BluetoothConnectionState> get connectionState => _ble.connectionState;
 
   StreamSubscription<List<int>>? _rxSub;

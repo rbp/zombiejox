@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import '../devices/dumbbell.dart';
 import '../devices/weight_group.dart';
+import '../protocol/dumbbell_state.dart';
 import '../state/preferences.dart';
 import '../state/weights.dart';
 import '../widgets/dumbbell_card.dart';
@@ -33,13 +36,40 @@ class _ControlScreenState extends State<ControlScreen> {
   late final WeightGroup _group =
       widget.createWeightGroup?.call() ?? WeightGroup();
   final List<Object> _connectErrors = [];
+  StreamSubscription<List<Dumbbell>>? _changesSub;
+  // Per-dumbbell state subscriptions. We trigger setState on every emission
+  // so derived values like `_allReady` and the consensus weight refresh
+  // promptly — `_group.changes` only fires on membership changes.
+  final Map<Dumbbell, StreamSubscription<DumbbellState>> _stateSubs = {};
 
   @override
   void initState() {
     super.initState();
+    _changesSub = _group.changes.listen(_onMembership);
     for (final d in widget.devices) {
       _addOne(d);
     }
+  }
+
+  void _onMembership(List<Dumbbell> current) {
+    final asSet = current.toSet();
+    // Drop subscriptions for removed members.
+    final removed = _stateSubs.keys
+        .where((d) => !asSet.contains(d))
+        .toList(growable: false);
+    for (final d in removed) {
+      _stateSubs.remove(d)?.cancel();
+    }
+    // Subscribe to newly-added members.
+    for (final d in current) {
+      _stateSubs.putIfAbsent(
+        d,
+        () => d.states.listen((_) {
+          if (mounted) setState(() {});
+        }),
+      );
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _addOne(BluetoothDevice device) async {
@@ -53,6 +83,11 @@ class _ControlScreenState extends State<ControlScreen> {
 
   @override
   void dispose() {
+    _changesSub?.cancel();
+    for (final s in _stateSubs.values) {
+      s.cancel();
+    }
+    _stateSubs.clear();
     _group.disconnectAll();
     super.dispose();
   }
@@ -60,6 +95,7 @@ class _ControlScreenState extends State<ControlScreen> {
   @override
   Widget build(BuildContext context) {
     final unit = widget.preferences.getUnit();
+    final dumbbells = _group.dumbbells;
 
     return Scaffold(
       appBar: AppBar(
@@ -72,18 +108,11 @@ class _ControlScreenState extends State<ControlScreen> {
           ),
         ],
       ),
-      body: StreamBuilder<List<Dumbbell>>(
-        stream: _group.changes,
-        initialData: _group.dumbbells,
-        builder: (context, snap) {
-          final dumbbells = snap.data ?? const <Dumbbell>[];
-          return _Body(
-            dumbbells: dumbbells,
-            unit: unit,
-            connectErrors: _connectErrors,
-            onSelectIndex: (idx) => _group.setWeightIndex(idx),
-          );
-        },
+      body: _Body(
+        dumbbells: dumbbells,
+        unit: unit,
+        connectErrors: _connectErrors,
+        onSelectIndex: (idx) => _group.setWeightIndex(idx),
       ),
     );
   }
@@ -128,11 +157,17 @@ class _Body extends StatelessWidget {
   /// Are any connected dumbbells currently moving?
   bool _anyMoving() => dumbbells.any((d) => d.lastState?.motorActive ?? false);
 
+  /// True only when every member has finished connecting. Until then,
+  /// pressing a weight button would hit an uninitialized TX characteristic
+  /// on the still-connecting Dumbbell.
+  bool _allReady() => dumbbells.every((d) => d.isReady);
+
   @override
   Widget build(BuildContext context) {
     final selected = _consensusIndex();
     final moving = _anyMoving();
-    final canPress = dumbbells.isNotEmpty && !moving;
+    final ready = _allReady();
+    final canPress = dumbbells.isNotEmpty && !moving && ready;
 
     return Padding(
       padding: const EdgeInsets.all(16),
