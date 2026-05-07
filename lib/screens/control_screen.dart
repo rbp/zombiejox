@@ -136,15 +136,16 @@ class _Body extends StatelessWidget {
     required this.onSelectIndex,
   });
 
-  /// The currently-selected weight index, if every connected dumbbell agrees.
-  /// Returns null when the group is empty, when any device hasn't reported
-  /// state yet, or when devices disagree.
+  /// The currently-selected weight index, **looking only at ready members**.
+  /// Returns null when no member is ready yet, or when ready members
+  /// disagree (e.g. one was set manually via the dock buttons after being
+  /// connected). Not-ready members are ignored so a single offline dumbbell
+  /// doesn't suppress the indicator for the rest of the group.
   int? _consensusIndex() {
-    if (dumbbells.isEmpty) return null;
     int? agreed;
     for (final d in dumbbells) {
       final s = d.lastState;
-      if (s == null) return null;
+      if (s == null) continue;
       if (agreed == null) {
         agreed = s.weightIndex;
       } else if (agreed != s.weightIndex) {
@@ -154,20 +155,21 @@ class _Body extends StatelessWidget {
     return agreed;
   }
 
-  /// Are any connected dumbbells currently moving?
+  /// Any ready dumbbell currently moving its motor?
   bool _anyMoving() => dumbbells.any((d) => d.lastState?.motorActive ?? false);
 
-  /// True only when every member has finished connecting. Until then,
-  /// pressing a weight button would hit an uninitialized TX characteristic
-  /// on the still-connecting Dumbbell.
-  bool _allReady() => dumbbells.every((d) => d.isReady);
+  /// At least one member has finished connecting and is safe to write to.
+  /// Set-weight is enabled as soon as this is true — not-ready members are
+  /// silently skipped by [WeightGroup.setWeightIndex], so an offline
+  /// dumbbell never blocks the rest. Each card still shows its own
+  /// "Connecting…" / "Idle" / "Moving…" state.
+  bool _anyReady() => dumbbells.any((d) => d.isReady);
 
   @override
   Widget build(BuildContext context) {
     final selected = _consensusIndex();
     final moving = _anyMoving();
-    final ready = _allReady();
-    final canPress = dumbbells.isNotEmpty && !moving && ready;
+    final canPress = _anyReady() && !moving;
 
     return Padding(
       padding: const EdgeInsets.all(16),

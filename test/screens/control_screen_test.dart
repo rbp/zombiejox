@@ -127,7 +127,9 @@ void main() {
     }
   });
 
-  testWidgets('weight buttons stay disabled until every dumbbell is ready',
+  testWidgets(
+      'weight buttons enable as soon as ANY dumbbell is ready; tap fans out '
+      'only to ready members so an offline pair-mate never blocks the rest',
       (tester) async {
     final prefs = await _freshPrefs();
     final fakes = <_FakeDumbbell>[];
@@ -147,53 +149,55 @@ void main() {
     await tester.pumpAndSettle();
     expect(fakes, hasLength(2));
 
-    // Initially neither fake has emitted state — every weight button must
-    // be disabled (its onPressed is null) so a fast tap can't reach the
-    // not-yet-connected TX characteristic.
-    final allButtons =
+    // No fake has emitted state yet — every weight button is disabled so a
+    // fast tap can't hit an uninitialized TX characteristic.
+    var allButtons =
         tester.widgetList<FilledButton>(find.byType(FilledButton)).toList();
     expect(allButtons, hasLength(8));
     for (final b in allButtons) {
       expect(b.onPressed, isNull,
-          reason: 'every weight button must be disabled before isReady');
+          reason: 'no member ready → every button disabled');
     }
 
-    // Tapping a button while disabled is a no-op — verifies the guard.
+    // Tapping while disabled is a guarded no-op.
     await tester.tap(find.text('20 lbs'), warnIfMissed: false);
     await tester.pumpAndSettle();
     for (final f in fakes) {
       expect(f.setWeightCalls, isEmpty);
     }
 
-    // Bring one fake ready; buttons must still be disabled because the
-    // *other* one hasn't reported state yet.
+    // Bring ONE fake ready — leaves the other "stuck connecting" forever
+    // (simulating an offline / out-of-range pair-mate).
     fakes[0].emitState(
       const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
     );
     await tester.pumpAndSettle();
-    for (final b
-        in tester.widgetList<FilledButton>(find.byType(FilledButton))) {
-      expect(b.onPressed, isNull,
-          reason: 'one ready, one not — buttons must still be disabled');
-    }
 
-    // Bring the second one ready; buttons enable.
+    // Buttons must enable now — we don't want one offline dumbbell to block
+    // the user from controlling the one that's actually working.
+    allButtons =
+        tester.widgetList<FilledButton>(find.byType(FilledButton)).toList();
+    final enabledCount = allButtons.where((b) => b.onPressed != null).length;
+    expect(enabledCount, 8,
+        reason: 'one ready ⇒ buttons enabled; offline mate ignored');
+
+    // Tap → fan-out reaches only the ready fake.
+    await tester.tap(find.text('14 lbs'));
+    await tester.pumpAndSettle();
+    expect(fakes[0].setWeightCalls, [1]);
+    expect(fakes[1].setWeightCalls, isEmpty,
+        reason: 'WeightGroup must skip the not-ready member');
+
+    // When the offline dumbbell finally comes online, taps fan out to
+    // both.
     fakes[1].emitState(
       const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
     );
     await tester.pumpAndSettle();
-    final enabledCount = tester
-        .widgetList<FilledButton>(find.byType(FilledButton))
-        .where((b) => b.onPressed != null)
-        .length;
-    expect(enabledCount, 8, reason: 'all buttons enabled once both ready');
-
-    // And now the tap reaches both fakes.
-    await tester.tap(find.text('14 lbs'));
+    await tester.tap(find.text('20 lbs'));
     await tester.pumpAndSettle();
-    for (final f in fakes) {
-      expect(f.setWeightCalls, [1]);
-    }
+    expect(fakes[0].setWeightCalls, [1, 2]);
+    expect(fakes[1].setWeightCalls, [2]);
   });
 
   testWidgets('shows kg labels when preference is kg', (tester) async {
