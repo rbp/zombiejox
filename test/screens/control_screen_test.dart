@@ -20,6 +20,7 @@ class _FakeDumbbell extends Dumbbell {
       StreamController<BluetoothConnectionState>.broadcast();
   DumbbellState? _last;
   final List<int> setWeightCalls = [];
+  bool failSetWeight = false;
 
   @override
   Stream<DumbbellState> get states => _states.stream;
@@ -38,6 +39,9 @@ class _FakeDumbbell extends Dumbbell {
   @override
   Future<void> setWeightIndex(int index) async {
     setWeightCalls.add(index);
+    if (failSetWeight) {
+      throw StateError('fake set-weight failure');
+    }
     _last = DumbbellState(
       weightIndex: index,
       motorActive: false,
@@ -198,6 +202,42 @@ void main() {
     await tester.pumpAndSettle();
     expect(fakes[0].setWeightCalls, [1, 2]);
     expect(fakes[1].setWeightCalls, [2]);
+  });
+
+  testWidgets(
+      'a failing setWeightIndex surfaces a SnackBar (not an uncaught error)',
+      (tester) async {
+    final prefs = await _freshPrefs();
+    final fakes = <_FakeDumbbell>[];
+    final group = WeightGroup(newDumbbell: (d) {
+      final f = _FakeDumbbell(d);
+      fakes.add(f);
+      return f;
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: ControlScreen(
+        devices: [_device('AA:01')],
+        preferences: prefs,
+        createWeightGroup: () => group,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // Make the dumbbell ready, then arm a failure for the next write.
+    fakes.single.emitState(
+      const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
+    );
+    await tester.pumpAndSettle();
+    fakes.single.failSetWeight = true;
+
+    await tester.tap(find.text('20 lbs'));
+    await tester.pumpAndSettle();
+
+    // The failure must have been awaited and turned into a SnackBar — not
+    // a flutter framework "unhandled error" that crashes the test.
+    expect(find.byType(SnackBar), findsOneWidget);
+    expect(find.textContaining('Failed to set weight'), findsOneWidget);
   });
 
   testWidgets('shows kg labels when preference is kg', (tester) async {

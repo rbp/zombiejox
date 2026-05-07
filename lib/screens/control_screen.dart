@@ -112,9 +112,23 @@ class _ControlScreenState extends State<ControlScreen> {
         dumbbells: dumbbells,
         unit: unit,
         connectErrors: _connectErrors,
-        onSelectIndex: (idx) => _group.setWeightIndex(idx),
+        onSelectIndex: _onSelectIndex,
       ),
     );
+  }
+
+  /// Called when the user taps a weight button. Awaits the fan-out so a
+  /// thrown error from any ready-but-failed member surfaces as a SnackBar
+  /// instead of becoming an uncaught async exception.
+  Future<void> _onSelectIndex(int idx) async {
+    try {
+      await _group.setWeightIndex(idx);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to set weight: $e')),
+      );
+    }
   }
 
   Future<void> _disconnectAndPop() async {
