@@ -49,99 +49,95 @@ The BLE protocol is undocumented. One third-party developer (Eamon Tuhami / X8IQ
 
 ---
 
-## Phase 1: Flutter MVP — ⏳ in progress
+## Phase 1: Flutter MVP — 🟡 scaffold merged, advanced UX pending
 
-The MVP supports N connected DumbbellConnect devices, drives them all from a single weight grid, displays in lbs or kg per user preference, and remembers connected devices for fast warm-start. Detailed plan in `~/.claude/plans/wobbly-drifting-stardust.md`; summary follows.
+The Flutter scaffold landed in PR #1 (commit `e091190`, "Phase 1: scaffold Flutter app with DumbbellConnect MVP"). The protocol layer, BLE service, single-device connect/control flow, and protocol unit tests are all in. The advanced UX features from the agreed plan — multi-device support, settings/units toggle, remembered devices, custom icon wiring, permission-rationale screen — are pending and tracked in the "Remaining" subsection at the end of this phase.
 
-### 1a. Create the Flutter project at the repo root
+The MVP target supports N connected DumbbellConnect devices, drives them all from a single weight grid, displays in lbs or kg per user preference, and remembers connected devices for fast warm-start. Detailed plan in `~/.claude/plans/wobbly-drifting-stardust.md`; summary follows.
 
-```
-cd /Users/rbp/projects/zombiejox
-flutter create --org net.isnomore.zombiejox --project-name zombiejox --platforms ios,android .
-```
+### 1a. Create the Flutter project at the repo root — ✅ done
 
-The trailing `.` adds Flutter scaffold (`pubspec.yaml`, `lib/`, `android/`, `ios/`, `test/`) directly to the repo root, alongside existing `README.md`, `docs/`, `assets/`, `reverse-engineering/`. `--platforms ios,android` keeps Flutter from generating `linux/` / `macos/` / `windows/` / `web/`.
+Project created with `flutter create --org net.isnomore.zombiejox --project-name zombiejox --platforms ios,android .` Repo-root layout is in place: `pubspec.yaml`, `lib/`, `android/`, `ios/`, `test/`, `analysis_options.yaml` all alongside the existing docs/assets/reverse-engineering trees.
 
-### 1b. Dependencies (`pubspec.yaml`)
+### 1b. Dependencies (`pubspec.yaml`) — 🟡 partial
 
-Runtime:
-- `flutter_blue_plus: ^2.2.3` — current latest. **2.x line** (1.x docs floating around the web have a different API).
-- `permission_handler: ^12.0.1` — Android 12+ runtime perms for `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT`.
-- `shared_preferences: ^2.x` — units setting and remembered-device MACs.
+Installed:
+- `flutter_blue_plus: ^2.3.1` ✅ (newer minor than the planned 2.2.3 — current latest at time of PR; fine)
+- `permission_handler: ^12.0.1` ✅
+- `cupertino_icons: ^1.0.8` (default Flutter cruft)
 
-Dev:
-- `flutter_launcher_icons: ^0.14.x` — generates platform icon sets from a single PNG.
-- `flutter_native_splash: ^2.x` — generates platform splash screens from a single PNG.
+Not yet installed (needed for remaining UX work):
+- `shared_preferences` — for units setting and remembered-device MACs
+- `flutter_launcher_icons` (dev) — for wiring the custom logo into platform icon sets
+- `flutter_native_splash` (dev) — for the splash screen
 
-No state-management library yet — `StreamBuilder` over `flutter_blue_plus` streams + thin `Dumbbell` / `WeightGroup` classes are enough for MVP.
+### 1c. Assets — icon and splash — ⏳ default Flutter icon still in place
 
-### 1c. Assets — icon and splash from existing SVG
+Platform icon files exist (`android/app/src/main/res/mipmap-*/ic_launcher.png`, `ios/Runner/Assets.xcassets/AppIcon.appiconset/*`) but they're the default Flutter blue logo from `flutter create`, not our zombie. To finish:
 
 ```
 rsvg-convert -w 1024 -h 1024 assets/zombiejox-logo-bg.svg -o assets/icon-1024.png
+# add flutter_launcher_icons + flutter_native_splash to dev deps and configure
 flutter pub run flutter_launcher_icons
 flutter pub run flutter_native_splash:create
 ```
 
-Use the cream-background variant (`zombiejox-logo-bg.svg`) since iOS rejects transparent icons.
-
-### 1d. Source layout (paths relative to repo root)
+### 1d. Source layout — 🟡 partial (single-device pieces in; multi-device + state/ + extra screens pending)
 
 ```
 lib/
-  main.dart                         # MaterialApp, root navigator
+  main.dart                         ✅
   protocol/
-    checksum.dart                   # Port from docs/ble_protocol.md §6
-    frame.dart                      # buildFrame / parseFrame
-    opcodes.dart                    # 0x08, 0xC0, 0xD1, 0xD2, 0xD6, …
-    dumbbell_state.dart             # Parsed state from D2/D1 broadcasts
+    checksum.dart                   ✅
+    frame.dart                      ✅
+    opcodes.dart                    ✅
+    dumbbell_state.dart             ✅
   ble/
-    uuids.dart                      # Service / RX / TX UUIDs
-    ble_service.dart                # FlutterBluePlus wrapper
+    uuids.dart                      ✅
+    ble_service.dart                ✅
   devices/
-    dumbbell.dart                   # Single connection: connect, init, setWeightIndex, state stream
-    weight_group.dart               # Collection of N dumbbells; fans set-weight to all members
-  state/
-    preferences.dart                # Units + remembered MACs (shared_preferences)
-    weights.dart                    # Index ↔ lbs ↔ kg lookup
+    dumbbell.dart                   ✅
+    weight_group.dart               ⏳   N-device fan-out (needed for multi-dumbbell)
+  state/                            ⏳   directory not created yet
+    preferences.dart                ⏳   units + remembered MACs (shared_preferences)
+    weights.dart                    ⏳   Index ↔ lbs ↔ kg lookup
   screens/
-    permission_screen.dart          # Pre-permission rationale + flow
-    scan_screen.dart                # Discovery, remembered-device fast path
-    control_screen.dart             # N device cards + single weight grid
-    settings_screen.dart            # Units toggle
-    about_screen.dart               # Credits + license + version
-  widgets/
-    weight_button.dart              # Selectable button with motion-pending state
-    dumbbell_card.dart              # Per-device status card
-test/                               # Unit tests for protocol/ + state/
-android/app/src/main/AndroidManifest.xml
-ios/Runner/Info.plist
+    scan_screen.dart                ✅   currently a single-tap-to-connect; needs multi-select + remembered pinning
+    dumbbell_screen.dart            ✅   single-device control screen (works); will be replaced/renamed by control_screen.dart
+    permission_screen.dart          ⏳   pre-permission rationale (critical on iOS)
+    control_screen.dart             ⏳   N device cards + single weight grid
+    settings_screen.dart            ⏳   units toggle
+    about_screen.dart               ⏳   credits + license + version
+  widgets/                          ⏳   directory not created yet
+    weight_button.dart              ⏳
+    dumbbell_card.dart              ⏳
+test/
+  protocol/
+    checksum_test.dart              ✅
+    frame_test.dart                 ✅
+android/app/src/main/AndroidManifest.xml   ✅   BLE perms in place
+ios/Runner/Info.plist                       ✅   Bluetooth usage description in place
 ```
 
-The `protocol/` and `state/` layers are pure Dart — no Flutter or BLE imports, fully unit-testable.
+### 1e. Platform setup — ✅ done
 
-### 1e. Platform setup
+Android `<uses-permission>` entries (`BLUETOOTH_SCAN` with `neverForLocation`, `BLUETOOTH_CONNECT`, `ACCESS_FINE_LOCATION`) and iOS `NSBluetoothAlwaysUsageDescription` are configured per the PR.
 
-- **Android** (`android/app/src/main/AndroidManifest.xml`): `<uses-permission>` entries for `BLUETOOTH_SCAN` (with `usesPermissionFlags="neverForLocation"`), `BLUETOOTH_CONNECT`, `ACCESS_FINE_LOCATION` (Android 11 and below). `minSdkVersion` = 21+.
-- **iOS** (`ios/Runner/Info.plist`): `NSBluetoothAlwaysUsageDescription` = `"ZombieJox uses Bluetooth to talk to your JaxJox dumbbells."`
+### 1f. User flow — 🟡 partial
 
-### 1f. User flow (the "done" definition)
+What works in the merged scaffold:
+- ✅ Cold start: OS permission prompt (no rationale screen) → scan screen → tap device → connect → single-device control screen
+- ✅ Single-device control screen with weight grid; `0xD6 <idx>` writes physically move the dumbbell
 
-**Cold start:** splash → permission rationale → OS prompt → scan screen. Scan filters advertised names by prefix `DB200`. Tap device(s) to connect. Multi-select supported.
-
-**Warm start:** splash → scan screen with remembered devices pinned at top + auto-reconnect kicked off in parallel. As soon as ≥ 1 connection lands, jump to control screen.
-
-**Control screen:**
-- One **dumbbell card** per connected device (name, connection dot, battery %, current weight, motor state).
-- Layout scales: 1 device = single card; 2 = stacked / side-by-side; 3+ = vertical list.
-- **Single 2×4 weight grid** below all cards: tapping a button fans `0xD6 <idx>` to every connected device in parallel.
-- Tapped button shows "moving" state until `0xD1` motor-settle push (`byte 6 = 0x04`) arrives.
-- Three-dot menu: Settings / About / Disconnect all.
-- Manual weight changes (via the dumbbell's own buttons) reflect via `0xD2` byte 11 — no fight between user and dumbbell.
-
-**Settings:** lbs / kg toggle (default from device locale), persisted via `shared_preferences`. Changes button labels only — same `0xD6 <idx>` is sent regardless. Note: doesn't change the dumbbell's physical display unit (we don't have that opcode yet — see 0f).
-
-**Edge cases (must all be handled cleanly):** Bluetooth-off, permission-denied, out-of-range, mid-session connection drops. No infinite spinners.
+What's still needed to hit the MVP target:
+- ⏳ **Pre-permission rationale screen** before invoking the OS prompt (critical on iOS where denied = unrecoverable without going to Settings.app)
+- ⏳ **Multi-select on scan**: connect to N devices in one trip
+- ⏳ **Warm start with remembered devices**: pinned-at-top, auto-reconnect in parallel
+- ⏳ **Control screen overhaul**: N device cards + single weight grid below; tapping fans `0xD6` to all connected devices
+- ⏳ **Settings screen**: lbs/kg toggle (default from locale), persisted in `shared_preferences`
+- ⏳ **About screen**: credits + license + protocol-doc link
+- ⏳ **Edge-case screens**: Bluetooth-off, permission-denied, mid-session drops — currently undefined behaviour
+- ⏳ **Custom logo wired into icon and splash**
 
 ### 1g. Index ↔ weight lookup
 
@@ -158,7 +154,20 @@ The `protocol/` and `state/` layers are pure Dart — no Flutter or BLE imports,
 
 (kg values are exact lb→kg conversion to 1 decimal place. Verify on a real kg-mode dumbbell once shippable.)
 
-### 1h. Out of scope for MVP (deferred)
+### 1h. Remaining work to close out Phase 1 (in priority order)
+
+1. Add `shared_preferences` runtime dep + `flutter_launcher_icons`/`flutter_native_splash` dev deps to `pubspec.yaml`; run `flutter pub get`.
+2. Wire the custom logo: generate `assets/icon-1024.png` from `zombiejox-logo-bg.svg`, run the icon and splash generators.
+3. Create `lib/state/weights.dart` (index↔lbs↔kg lookup) and `lib/state/preferences.dart` (units + remembered-MAC persistence).
+4. Create `lib/devices/weight_group.dart` and refactor the control screen to drive a `WeightGroup` instead of a single `Dumbbell`.
+5. Create `lib/screens/permission_screen.dart` (pre-permission rationale) and route to it on cold start.
+6. Refactor `scan_screen.dart` to support multi-select + remembered-device pinning + auto-reconnect on warm start.
+7. Replace `dumbbell_screen.dart` with `control_screen.dart` that handles N device cards.
+8. Add `lib/screens/settings_screen.dart` (units toggle) and `about_screen.dart`.
+9. Extract reusable widgets: `widgets/weight_button.dart`, `widgets/dumbbell_card.dart`.
+10. Add explicit edge-case screens (Bluetooth disabled, permission denied, all devices out of range).
+
+### 1i. Out of scope for MVP (deferred)
 
 - Per-dumbbell weight override (asymmetric warmup) — Phase 2+
 - Pushing the unit toggle to the dock physically (need 0f HCI snoop to find the opcode)
@@ -216,10 +225,10 @@ Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case harde
 
 ## Recommended Order of Work
 
-**Phase 0 is complete.** Set-weight works end-to-end against a real dumbbell. Starting Phase 1.
+**Phase 0 is complete; Phase 1 scaffold is merged (PR #1).** Single-device flow works; multi-device + persistence + units/about screens remain (see Phase 1.1h above).
 
 1. ✅ Phase 0 reverse-engineering (0a–0e done; 0f deferred as nice-to-have)
-2. ⏳ Phase 1 — Flutter MVP scaffold (current)
+2. 🟡 Phase 1 — Flutter MVP (scaffold + protocol layer + single-device control merged; remaining MVP features tracked in §1h)
 3. ⏳ Phase 2 — Polish, error handling, edge-case hardening
 4. ⏳ 0f (optional, low priority) — HCI snoop for kg/lbs toggle opcode and remaining `0xD2` byte semantics
 5. ⏳ Phase 3 — Testing & distribution
@@ -229,15 +238,15 @@ Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case harde
 ## Verification
 
 - ✅ **Protocol correctness** — `0xD6 <idx>` sent from nRF Connect physically moves the dumbbell across all 8 indices on `DB200-0161997`.
-- ⏳ **App functionality (MVP gate)**, run from repo root:
-  - `flutter pub get` / `flutter analyze` / `flutter test` clean
-  - Splash → permission rationale → OS prompt → scan screen
-  - Scan finds the dumbbell when in range
-  - Tapping any weight button physically moves the dumbbell to that setting
-  - "8 lbs" → lowest setting; "50 lbs" → highest
-  - Switching to kg in Settings re-labels all buttons; same action still works
-  - Killing the app and reopening reconnects automatically (remembered MAC)
-  - Battery percentage matches Battery Service value
-- ⏳ **Multi-device** — connect to two dumbbells, set weight, both move
+- ✅ **Protocol unit tests** — `test/protocol/checksum_test.dart` and `test/protocol/frame_test.dart` exercise the checksum algorithm and the frame builder/parser round-trip.
+- 🟡 **App functionality (MVP gate)**, run from repo root:
+  - 🟡 Code paths for `flutter pub get` / `flutter analyze` / `flutter test` exist in the scaffold; runtime "clean" status not re-checked since merge.
+  - ⏳ Splash → permission rationale → OS prompt → scan screen (rationale screen pending)
+  - 🟡 `ScanScreen` filters by name prefix `DB200`; runtime confirmation against a real device pending.
+  - 🟡 `DumbbellScreen` wires weight buttons to `Dumbbell.setWeightIndex`; physical-motion confirmation against the merged build pending.
+  - ⏳ Switching to kg in Settings re-labels all buttons (Settings screen pending)
+  - ⏳ Killing the app and reopening reconnects automatically (remembered MAC — pending)
+  - 🟡 `Dumbbell` reads battery via the Battery Service; runtime cross-check pending.
+- ⏳ **Multi-device** — connect to two dumbbells, set weight, both move (pending `WeightGroup`)
 - ⏳ **Cross-platform** — same flow works on iOS (BLE doesn't work in simulators; physical device required)
 - ⏳ **Edge cases** — toggle Bluetooth off mid-session: cards grey out, recover on re-enable
