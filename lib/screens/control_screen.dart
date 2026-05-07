@@ -10,14 +10,19 @@ import '../widgets/weight_button.dart';
 
 /// Screen for controlling N connected dumbbells. The membership comes in
 /// as [devices]; the screen owns the [WeightGroup] lifecycle.
+///
+/// Tests can override [createWeightGroup] to inject a [WeightGroup] with a
+/// fake-dumbbell factory.
 class ControlScreen extends StatefulWidget {
   final List<BluetoothDevice> devices;
   final Preferences preferences;
+  final WeightGroup Function()? createWeightGroup;
 
   const ControlScreen({
     super.key,
     required this.devices,
     required this.preferences,
+    this.createWeightGroup,
   });
 
   @override
@@ -25,7 +30,8 @@ class ControlScreen extends StatefulWidget {
 }
 
 class _ControlScreenState extends State<ControlScreen> {
-  final WeightGroup _group = WeightGroup();
+  late final WeightGroup _group =
+      widget.createWeightGroup?.call() ?? WeightGroup();
   final List<Object> _connectErrors = [];
 
   @override
