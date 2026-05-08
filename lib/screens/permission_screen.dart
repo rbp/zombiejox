@@ -4,7 +4,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../state/preferences.dart';
 import 'scan_screen.dart';
 
-/// Pre-permission rationale shown on first launch, before the OS Bluetooth
+/// Pre-permission rationale shown before the OS Bluetooth
 /// prompt fires. Critical on iOS where a denied prompt cannot be re-prompted
 /// — the user has to be sent to Settings.app to recover. By framing the
 /// "why" first, we improve the chance the user grants on the first try.
@@ -64,8 +64,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
     if (_requesting) return;
     setState(() => _requesting = true);
 
-    final request = widget.requestPermissions ??
-        PermissionScreen._defaultRequestPermissions;
+    final request = widget.requestPermissions ?? PermissionScreen._defaultRequestPermissions;
     final granted = await request();
 
     if (!mounted) return;
