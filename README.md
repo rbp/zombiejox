@@ -127,10 +127,11 @@ welcome.
   the company didn't make it
 - Everyone who's owned bricked smart-fitness equipment and wondered
   if it had to be that way
+- Rodrigo Pimentel started this project. See [CREDITS](CREDITS) for more details.
 
 ## License
 
-GPLv3 (TBD — confirm before first release)
+[GPLv3](COPYING)
 
 ## Disclaimer
 

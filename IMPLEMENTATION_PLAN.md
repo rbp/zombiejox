@@ -239,9 +239,10 @@ Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case harde
 
 1. ✅ Phase 0 reverse-engineering (0a–0e done; 0f deferred as nice-to-have)
 2. 🟡 Phase 1 — Flutter MVP (scaffold + protocol + single-device control merged in PR #1; multi-device control + tests merged in `phase1/multi-device-control`; settings/about/icon/persistence/permission-rationale remaining per §1h)
-3. ⏳ Phase 2 — Polish, error handling, edge-case hardening
-4. ⏳ 0f (optional, low priority) — HCI snoop for kg/lbs toggle opcode and remaining `0xD2` byte semantics
-5. ⏳ Phase 3 — Testing & distribution
+3. ⏳ Phase 2 — UX and UI improvements; make the app a joy to use.
+4. ⏳ Phase 3 — Polish, error handling, edge-case hardening
+5. ⏳ Phase 0/0f — HCI snoop for kg/lbs toggle opcode and remaining `0xD2` byte semantics
+6. ⏳ Phase 3 — Testing & distribution
 
 ---
 
