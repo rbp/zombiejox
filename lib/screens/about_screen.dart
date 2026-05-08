@@ -58,7 +58,10 @@ class AboutScreen extends StatelessWidget {
           const SizedBox(height: 24),
           Text('License', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
-          const Text('GPLv3 (TBD — confirm before first release).'),
+          const SelectableText(
+            'Licensed under GPLv3. See COPYING in the project repo for the '
+            'full license text.',
+          ),
           const SizedBox(height: 24),
           Text('Disclaimer', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
