@@ -166,7 +166,7 @@ What's still needed to hit the MVP target:
 
 ### 1h. Remaining work to close out Phase 1 (in priority order)
 
-✅ Done across the multi-device-control and permissions-and-settings branches: `shared_preferences`; `state/weights.dart`; reactive `state/preferences.dart` (units + bluetooth-rationale flag); `devices/weight_group.dart`; `widgets/{weight_button,dumbbell_card}.dart`; `screens/{control,scan,permission,settings,about}_screen.dart`; multi-select on the scan screen; settings/about reachable via gear icon.
+✅ Done across the multi-device-control and permissions-and-settings branches: `shared_preferences`; `state/weights.dart`; reactive `state/preferences.dart` (units); `devices/weight_group.dart`; `widgets/{weight_button,dumbbell_card}.dart`; `screens/{control,scan,permission,settings,about}_screen.dart`; multi-select on the scan screen; settings/about reachable via gear icon.
 
 Still pending:
 
