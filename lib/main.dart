@@ -19,10 +19,18 @@ Future<void> main() async {
 /// decide between the rationale screen (not granted) and going straight to
 /// scan (granted). Re-checked on every cold start so OS-level revocations
 /// re-trigger the rationale.
+///
+/// Defaults to `false` on plugin-channel failure so a flaky platform call
+/// can't crash startup — the user lands on the rationale screen, which is
+/// the safer fallback (it has the Open-Settings escape hatch).
 Future<bool> _bluetoothPermissionsGranted() async {
-  final scan = await Permission.bluetoothScan.status;
-  final connect = await Permission.bluetoothConnect.status;
-  return scan.isGranted && connect.isGranted;
+  try {
+    final scan = await Permission.bluetoothScan.status;
+    final connect = await Permission.bluetoothConnect.status;
+    return scan.isGranted && connect.isGranted;
+  } catch (_) {
+    return false;
+  }
 }
 
 class ZombieJoxApp extends StatelessWidget {

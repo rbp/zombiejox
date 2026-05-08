@@ -64,8 +64,20 @@ class _PermissionScreenState extends State<PermissionScreen> {
     if (_requesting) return;
     setState(() => _requesting = true);
 
-    final request = widget.requestPermissions ?? PermissionScreen._defaultRequestPermissions;
-    final granted = await request();
+    final request = widget.requestPermissions ??
+        PermissionScreen._defaultRequestPermissions;
+
+    // A platform-channel failure (e.g. MissingPluginException, transient
+    // plugin error) shouldn't leave the button stuck on "Requesting…" or
+    // bubble up as an uncaught async exception. Treat it as a soft denial:
+    // the user still ends up on the denied screen with the Open Settings
+    // escape hatch.
+    bool granted;
+    try {
+      granted = await request();
+    } catch (_) {
+      granted = false;
+    }
 
     if (!mounted) return;
 

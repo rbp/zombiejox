@@ -127,7 +127,7 @@ android/app/src/main/AndroidManifest.xml   ✅
 ios/Runner/Info.plist                       ✅
 ```
 
-Total test count: **77 tests, all passing.** `flutter analyze` clean. `dart format` clean.
+Total test count: **78 tests, all passing.** `flutter analyze` clean. `dart format` clean.
 
 ### 1e. Platform setup — ✅ done
 
@@ -252,7 +252,7 @@ Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case harde
 
 - ✅ **Protocol correctness** — `0xD6 <idx>` sent from nRF Connect physically moves the dumbbell across all 8 indices on `DB200-0161997`.
 - ✅ **Protocol unit tests** — `test/protocol/checksum_test.dart` and `test/protocol/frame_test.dart` exercise the checksum algorithm and the frame builder/parser round-trip.
-- ✅ **State + group + widget + screen unit tests** — 70 tests total covering `state/{weights,preferences}`, `devices/weight_group`, `widgets/{weight_button,dumbbell_card}`, `screens/{control,scan,permission,settings,about}_screen`. `flutter analyze` clean.
+- ✅ **State + group + widget + screen unit tests** — 78 tests total covering `state/{weights,preferences}`, `devices/weight_group`, `widgets/{weight_button,dumbbell_card,failed_device_card}`, `screens/{control,scan,permission,settings,about}_screen`. `flutter analyze` clean.
 - ✅ **Multi-device fan-out (architectural)** — `WeightGroup.setWeightIndex` fan-out covered by unit tests against a fake-Dumbbell.
 
 ### Pending — needs on-device verification (Android + iOS)

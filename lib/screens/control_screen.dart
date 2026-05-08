@@ -80,15 +80,19 @@ class _ControlScreenState extends State<ControlScreen> {
   }
 
   Future<void> _addOne(BluetoothDevice device) async {
-    // Clear any prior failure entry for this device so the failed card
-    // disappears while the new attempt is in flight (the device will
-    // re-appear in `_group.dumbbells` as a "Connecting…" card via the
-    // membership stream).
-    if (_failedDevices.containsKey(device)) {
-      setState(() => _failedDevices.remove(device));
-    }
+    // We deliberately don't pre-clear an existing _failedDevices entry: the
+    // dumbbell is added to _group synchronously inside _group.add() before
+    // the first await, so by the next build dumbbellByDevice already has it
+    // and the DumbbellCard preempts the FailedDeviceCard via _cardFor's
+    // ordering. Clearing eagerly would briefly leave the slot in neither
+    // map and collapse it (the SizedBox.shrink fallback) for one frame.
     try {
       await _group.add(device);
+      if (!mounted) return;
+      // Connect succeeded — drop any stale failed entry from a prior attempt.
+      if (_failedDevices.containsKey(device)) {
+        setState(() => _failedDevices.remove(device));
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _failedDevices[device] = e);
@@ -244,10 +248,11 @@ class _Body extends StatelessWidget {
         onRetry: () => onRetry(device),
       );
     }
-    // Device is neither in the group nor in the failed set — happens for
-    // a beat between _addOne clearing the failed entry and WeightGroup.add
-    // emitting the new membership. Render an empty same-size placeholder
-    // (zero-height shrink is fine; the slot will fill in on the next frame).
+    // Should be unreachable: _addOne keeps the failed entry in place until
+    // _group.add either succeeds (dumbbell now in dumbbellByDevice) or fails
+    // (failed entry replaced atomically in the same setState as the removal
+    // from the group). Kept as a defensive zero-height fallback — a visible
+    // placeholder here would itself be the bug.
     return SizedBox.shrink(
       key: ValueKey('pending-${device.remoteId.str}'),
     );
