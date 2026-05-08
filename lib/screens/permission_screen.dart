@@ -9,9 +9,10 @@ import 'scan_screen.dart';
 /// — the user has to be sent to Settings.app to recover. By framing the
 /// "why" first, we improve the chance the user grants on the first try.
 ///
-/// Once the user has been past this screen once (granted or not), it's not
-/// shown again on subsequent launches; the scan screen has its own re-grant
-/// flow if permissions are revoked later.
+/// This is also the single source of truth for re-grant flows: if the user
+/// later revokes permission via Settings.app, [ScanScreen] detects the loss
+/// and `pushReplacement`'s back here rather than handling it inline. Keeping
+/// the rationale + denied + "Open Settings" UI in one place avoids drift.
 class PermissionScreen extends StatefulWidget {
   final Preferences preferences;
 
