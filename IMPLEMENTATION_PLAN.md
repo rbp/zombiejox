@@ -116,6 +116,7 @@ lib/
   widgets/
     weight_button.dart              ✅
     dumbbell_card.dart              ✅
+    failed_device_card.dart         ✅   shown when a device's connect throws; has a refresh icon to retry inline
 test/
   protocol/                         ✅   checksum_test, frame_test
   state/                            ✅   weights_test, preferences_test (incl. reactive listener)
@@ -126,7 +127,7 @@ android/app/src/main/AndroidManifest.xml   ✅
 ios/Runner/Info.plist                       ✅
 ```
 
-Total test count: **72 tests, all passing.** `flutter analyze` clean. `dart format` clean.
+Total test count: **77 tests, all passing.** `flutter analyze` clean. `dart format` clean.
 
 ### 1e. Platform setup — ✅ done
 

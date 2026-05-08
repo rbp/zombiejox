@@ -9,6 +9,7 @@ import 'package:zombiejox/devices/weight_group.dart';
 import 'package:zombiejox/protocol/dumbbell_state.dart';
 import 'package:zombiejox/screens/control_screen.dart';
 import 'package:zombiejox/state/preferences.dart';
+import 'package:zombiejox/widgets/failed_device_card.dart';
 
 /// Connects-instantly fake; lets the test push state values for assertions.
 class _FakeDumbbell extends Dumbbell {
@@ -21,6 +22,7 @@ class _FakeDumbbell extends Dumbbell {
   DumbbellState? _last;
   final List<int> setWeightCalls = [];
   bool failSetWeight = false;
+  bool failConnect = false;
 
   @override
   Stream<DumbbellState> get states => _states.stream;
@@ -33,6 +35,9 @@ class _FakeDumbbell extends Dumbbell {
 
   @override
   Future<void> connect() async {
+    if (failConnect) {
+      throw StateError('fake connect failure');
+    }
     _conn.add(BluetoothConnectionState.connected);
   }
 
@@ -238,6 +243,70 @@ void main() {
     // a flutter framework "unhandled error" that crashes the test.
     expect(find.byType(SnackBar), findsOneWidget);
     expect(find.textContaining('Failed to set weight'), findsOneWidget);
+  });
+
+  testWidgets(
+      'a connect failure renders a FailedDeviceCard at the bottom of the list',
+      (tester) async {
+    final prefs = await _freshPrefs();
+    final fakes = <_FakeDumbbell>[];
+    final group = WeightGroup(newDumbbell: (d) {
+      final f = _FakeDumbbell(d)..failConnect = true;
+      fakes.add(f);
+      return f;
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: ControlScreen(
+        devices: [_device('AA:01')],
+        preferences: prefs,
+        createWeightGroup: () => group,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(FailedDeviceCard), findsOneWidget);
+    expect(find.text('Failed to connect'), findsOneWidget);
+    expect(find.byIcon(Icons.refresh), findsOneWidget);
+    // The "ghost-card" approach: the device is no longer in the group but
+    // the user still sees a visual entry for it.
+    expect(group.dumbbells, isEmpty);
+  });
+
+  testWidgets(
+      'tapping refresh on a failed card retries; on success the failed card '
+      'disappears and a connecting/connected card takes its place',
+      (tester) async {
+    final prefs = await _freshPrefs();
+    final fakes = <_FakeDumbbell>[];
+    final group = WeightGroup(newDumbbell: (d) {
+      // First attempt fails; subsequent attempts (a fresh fake per call)
+      // succeed.
+      final attemptCount = fakes.length + 1;
+      final f = _FakeDumbbell(d)..failConnect = (attemptCount == 1);
+      fakes.add(f);
+      return f;
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: ControlScreen(
+        devices: [_device('AA:01')],
+        preferences: prefs,
+        createWeightGroup: () => group,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(FailedDeviceCard), findsOneWidget);
+
+    // Tap refresh.
+    await tester.tap(find.byIcon(Icons.refresh));
+    await tester.pumpAndSettle();
+
+    // The failed card is gone; the device is back in the group.
+    expect(find.byType(FailedDeviceCard), findsNothing);
+    expect(group.dumbbells, hasLength(1));
+    expect(fakes, hasLength(2)); // first attempt failed; second succeeded
   });
 
   testWidgets('shows kg labels when preference is kg', (tester) async {
