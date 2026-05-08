@@ -246,16 +246,36 @@ Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case harde
 
 ## Verification
 
+### Done
+
 - ✅ **Protocol correctness** — `0xD6 <idx>` sent from nRF Connect physically moves the dumbbell across all 8 indices on `DB200-0161997`.
 - ✅ **Protocol unit tests** — `test/protocol/checksum_test.dart` and `test/protocol/frame_test.dart` exercise the checksum algorithm and the frame builder/parser round-trip.
-- ✅ **State + group + widget unit tests** — 53 tests total covering `state/weights`, `state/preferences`, `devices/weight_group`, `widgets/weight_button`, `widgets/dumbbell_card`, `screens/control_screen`, `screens/scan_screen`. Suite runs clean; `flutter analyze` clean.
-- 🟡 **App functionality (MVP gate)**, run from repo root:
-  - ⏳ Splash → permission rationale → OS prompt → scan screen (rationale screen pending)
-  - 🟡 `ScanScreen` multi-select with `Connect (N)` button → `ControlScreen` with N device cards → tapping a weight button fans out to all. Code complete; on-device verification of the multi-select round trip pending.
-  - 🟡 Per-device card shows current weight, motor state, battery; values driven by `0xD2` / `0xD1` notifications. Code complete; on-device verification pending.
-  - 🟡 Weight buttons render in locale-default unit (lbs in US/UK/LR/MM, kg elsewhere). Code complete; on-device check of label rendering pending.
-  - ⏳ Switching to kg in Settings re-labels all buttons (Settings screen UI pending)
-  - ⏳ Killing the app and reopening reconnects automatically (remembered-MAC fast path pending)
-- ✅ **Multi-device fan-out (architectural)** — `WeightGroup.setWeightIndex` fan-out covered by 10 unit tests against a fake-Dumbbell. Real-device verification of two-dumbbell motion pending.
-- ⏳ **Cross-platform** — same flow works on iOS (BLE doesn't work in simulators; physical device required)
-- ⏳ **Edge cases** — toggle Bluetooth off mid-session: cards grey out, recover on re-enable
+- ✅ **State + group + widget + screen unit tests** — 70 tests total covering `state/{weights,preferences}`, `devices/weight_group`, `widgets/{weight_button,dumbbell_card}`, `screens/{control,scan,permission,settings,about}_screen`. `flutter analyze` clean.
+- ✅ **Multi-device fan-out (architectural)** — `WeightGroup.setWeightIndex` fan-out covered by unit tests against a fake-Dumbbell.
+
+### Pending — needs on-device verification (Android + iOS)
+
+The unit + widget test suites cover the pure-Dart and Flutter-widget layers, but they cannot exercise the BLE platform channels, the OS permission prompt UX, or actual motor motion. These need a **real device** for both platforms:
+
+#### Android (primary dev platform)
+
+- Permission rationale → Continue → OS prompt fires → grant → lands on scan screen.
+- Permission rationale → Continue → OS prompt → deny → lands on the denied-state UI with `Open Settings` and `Try again`.
+- `Try again` reverts to the rationale and re-requests on Continue.
+- Revoke Bluetooth permission via Settings.app, relaunch app: rationale shows again (because `Permission.bluetoothScan.isGranted` is now false). Verifies the routing-on-status logic.
+- Scan finds at least one `DB200` dumbbell when in range.
+- Multi-select two devices → Connect (2) → both connect → control screen shows two cards.
+- Tapping any weight button physically moves the dumbbell(s) to that setting.
+- Tapping "8 lbs" / "50 lbs" hits the extremes correctly.
+- Switching to kg in Settings re-labels every button across both visible screens **without** a navigation round-trip (validates the reactive `Preferences.unit` listener).
+- About screen renders with credits, license, disclaimer, and the `docs/ble_protocol.md` reference visible without scrolling jankiness.
+- Killing and reopening the app: scan finds the same device and a fresh connect-then-set-weight round-trip works.
+- Battery percentage on each card matches what nRF Connect shows for the same device.
+- Bluetooth turned off mid-session: cards grey out / re-enable: cards recover. (This is partially tracked under §1h "edge-case screens" but a pre-shipping spot-check is worth doing.)
+
+#### iOS (verification platform)
+
+- The whole list above on a real iPhone — flutter_blue_plus and `permission_handler` behave subtly differently from Android, and BLE absolutely does not work in the iOS simulator.
+- **Specifically test the permission rationale's first-launch behaviour on iOS.** `permission_handler` reports `denied` for `Permission.bluetoothScan`/`bluetoothConnect` on iOS until the OS has prompted at least once, *but* the OS prompt itself is triggered by `flutter_blue_plus`'s first BLE op (controlled by `NSBluetoothAlwaysUsageDescription` in `ios/Runner/Info.plist`), not by our `permission_handler.request()` call. If the rationale screen doesn't show on first launch, or if Continue feels like a no-op (iOS already reported "granted" so we navigate to scan, then the OS prompt fires from `ScanScreen`'s first BLE call), we'll need to revisit the routing logic — possibly bring back a "rationale shown" flag specifically for iOS. The current implementation assumes iOS reports `denied` on first launch; this is the riskiest unverified assumption in the project right now.
+- The lbs/kg toggle in Settings actually re-labels the buttons live (verifies `ValueListenable` works through the iOS Flutter render path).
+- TestFlight build is producible with the current scaffold.
