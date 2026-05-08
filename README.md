@@ -43,13 +43,14 @@ If you have one of the untested devices and want to help, open an issue.
 - Adjusts the weight remotely — all eight settings (8 / 14 / 20 / 26 / 32 / 38 / 44 / 50 lbs); a single tap sets every connected dumbbell at once
 - Shows live status per dumbbell: current weight, battery, motion state
 - Reflects manual weight changes (set via the dock's own buttons) in the UI
+- lbs / kg toggle in Settings (default follows your locale)
+- About screen with credits, license, and a pointer to the protocol docs
+- Pre-permission rationale on first launch — clear "this is what we need Bluetooth for, here's why" before the OS prompt fires
 
 ## What it doesn't do (yet)
 
-- Manual kg/lbs toggle (the buttons default to your locale — kg outside US/UK; no in-app override yet)
 - Remember devices between launches / auto-reconnect
-- Pre-permission rationale + edge-case screens (Bluetooth-off, permission-denied, out-of-range)
-- Settings / About screens
+- Edge-case screens (Bluetooth-off, all devices out of range, mid-session disconnect)
 - Connect to KettlebellConnect, FoamRollerConnect, or Chileaf HRMs
 - Run verified on iOS (the scaffold exists; not yet tested on a real iPhone)
 - Have its own app icon (still showing the default Flutter logo)

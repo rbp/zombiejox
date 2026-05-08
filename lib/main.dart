@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'screens/permission_screen.dart';
 import 'screens/scan_screen.dart';
 import 'state/preferences.dart';
 
@@ -16,13 +17,20 @@ class ZombieJoxApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Show the rationale + permission flow once per install. Subsequent
+    // launches go straight to scan — if permission was revoked between
+    // launches, the scan screen has its own re-grant prompt.
+    final home = preferences.hasShownBluetoothRationale
+        ? ScanScreen(preferences: preferences)
+        : PermissionScreen(preferences: preferences);
+
     return MaterialApp(
       title: 'ZombieJox',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: ScanScreen(preferences: preferences),
+      home: home,
     );
   }
 }

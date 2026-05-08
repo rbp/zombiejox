@@ -7,6 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../ble/uuids.dart';
 import '../state/preferences.dart';
 import 'control_screen.dart';
+import 'settings_screen.dart';
 
 class ScanScreen extends StatefulWidget {
   final Preferences preferences;
@@ -129,6 +130,15 @@ class _ScanScreenState extends State<ScanScreen> {
       appBar: AppBar(
         title: const Text('ZombieJox'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => SettingsScreen(preferences: widget.preferences),
+              ),
+            ),
+          ),
           StreamBuilder<bool>(
             stream: FlutterBluePlus.isScanning,
             initialData: false,

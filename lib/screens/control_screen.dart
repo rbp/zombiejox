@@ -10,6 +10,7 @@ import '../state/preferences.dart';
 import '../state/weights.dart';
 import '../widgets/dumbbell_card.dart';
 import '../widgets/weight_button.dart';
+import 'settings_screen.dart';
 
 /// Screen for controlling N connected dumbbells. The membership comes in
 /// as [devices]; the screen owns the [WeightGroup] lifecycle.
@@ -97,7 +98,6 @@ class _ControlScreenState extends State<ControlScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final unit = widget.preferences.getUnit();
     final dumbbells = _group.dumbbells;
 
     return Scaffold(
@@ -105,17 +105,31 @@ class _ControlScreenState extends State<ControlScreen> {
         title: const Text('ZombieJox'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => SettingsScreen(preferences: widget.preferences),
+              ),
+            ),
+          ),
+          IconButton(
             icon: const Icon(Icons.bluetooth_disabled),
             tooltip: 'Disconnect all',
             onPressed: _disconnectAndPop,
           ),
         ],
       ),
-      body: _Body(
-        dumbbells: dumbbells,
-        unit: unit,
-        connectErrors: _connectErrors,
-        onSelectIndex: _onSelectIndex,
+      // Listen to unit so toggling lbs ↔ kg in Settings re-labels every
+      // weight button on this screen without a navigation round-trip.
+      body: ValueListenableBuilder<WeightUnit>(
+        valueListenable: widget.preferences.unit,
+        builder: (context, unit, _) => _Body(
+          dumbbells: dumbbells,
+          unit: unit,
+          connectErrors: _connectErrors,
+          onSelectIndex: _onSelectIndex,
+        ),
       ),
     );
   }
