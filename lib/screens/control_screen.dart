@@ -37,10 +37,11 @@ class ControlScreen extends StatefulWidget {
 class _ControlScreenState extends State<ControlScreen> {
   late final WeightGroup _group =
       widget.createWeightGroup?.call() ?? WeightGroup();
-  // Devices whose most recent connect attempt threw. Rendered as
-  // FailedDeviceCards at the bottom of the list. Each entry persists until
-  // the user taps refresh and the connect either succeeds (entry removed
-  // when the device joins the group) or fails again (entry replaced).
+  // Devices whose most recent connect attempt threw. Each entry persists
+  // until the user taps refresh and the connect either succeeds (entry
+  // removed when the device joins the group) or fails again (entry
+  // replaced). Rendered in-place — the device's slot in the list stays put;
+  // only the card *content* swaps between FailedDeviceCard and DumbbellCard.
   final Map<BluetoothDevice, Object> _failedDevices = {};
   StreamSubscription<List<Dumbbell>>? _changesSub;
   // Per-dumbbell state subscriptions. We trigger setState on every emission
@@ -137,6 +138,7 @@ class _ControlScreenState extends State<ControlScreen> {
       body: ValueListenableBuilder<WeightUnit>(
         valueListenable: widget.preferences.unit,
         builder: (context, unit, _) => _Body(
+          orderedDevices: widget.devices,
           dumbbells: dumbbells,
           unit: unit,
           failedDevices: _failedDevices,
@@ -168,6 +170,11 @@ class _ControlScreenState extends State<ControlScreen> {
 }
 
 class _Body extends StatelessWidget {
+  // The devices in their original selection order. Cards render in this
+  // order regardless of connection state, so a failed card retrying — which
+  // briefly removes it from `failedDevices` and adds it to `dumbbells` —
+  // doesn't visually move it past its neighbours.
+  final List<BluetoothDevice> orderedDevices;
   final List<Dumbbell> dumbbells;
   final WeightUnit unit;
   final Map<BluetoothDevice, Object> failedDevices;
@@ -175,6 +182,7 @@ class _Body extends StatelessWidget {
   final Future<void> Function(BluetoothDevice) onRetry;
 
   const _Body({
+    required this.orderedDevices,
     required this.dumbbells,
     required this.unit,
     required this.failedDevices,
@@ -211,21 +219,61 @@ class _Body extends StatelessWidget {
   /// "Connecting…" / "Idle" / "Moving…" state.
   bool _anyReady() => dumbbells.any((d) => d.isReady);
 
+  /// Returns the card that belongs in [device]'s slot right now. Distinct
+  /// [ValueKey]s per state make [AnimatedSwitcher] treat the connected ↔
+  /// failed transitions as a real swap (and cross-fade them) instead of a
+  /// no-op rebuild of the same widget.
+  Widget _cardFor(
+    BluetoothDevice device,
+    Map<BluetoothDevice, Dumbbell> dumbbellByDevice,
+  ) {
+    final dumbbell = dumbbellByDevice[device];
+    if (dumbbell != null) {
+      return DumbbellCard(
+        key: ValueKey('connected-${device.remoteId.str}'),
+        dumbbell: dumbbell,
+        unit: unit,
+      );
+    }
+    final error = failedDevices[device];
+    if (error != null) {
+      return FailedDeviceCard(
+        key: ValueKey('failed-${device.remoteId.str}'),
+        device: device,
+        error: error,
+        onRetry: () => onRetry(device),
+      );
+    }
+    // Device is neither in the group nor in the failed set — happens for
+    // a beat between _addOne clearing the failed entry and WeightGroup.add
+    // emitting the new membership. Render an empty same-size placeholder
+    // (zero-height shrink is fine; the slot will fill in on the next frame).
+    return SizedBox.shrink(
+      key: ValueKey('pending-${device.remoteId.str}'),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final selected = _consensusIndex();
     final moving = _anyMoving();
     final canPress = _anyReady() && !moving;
 
-    // Connecting / connected cards first; failed-to-connect cards at the
-    // bottom of the same scrollable list so the user can retry inline.
+    // Cards render in [orderedDevices] order so a device retrying — which
+    // briefly leaves [failedDevices] before reappearing in [dumbbells] —
+    // doesn't shuffle past its neighbours. AnimatedSwitcher cross-fades
+    // the card *content* when a device flips between failed / connecting /
+    // connected, while the slot stays put.
+    final dumbbellByDevice = {
+      for (final d in dumbbells) d.device: d,
+    };
     final cards = <Widget>[
-      for (final d in dumbbells) DumbbellCard(dumbbell: d, unit: unit),
-      for (final entry in failedDevices.entries)
-        FailedDeviceCard(
-          device: entry.key,
-          error: entry.value,
-          onRetry: () => onRetry(entry.key),
+      for (final device in orderedDevices)
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 250),
+          transitionBuilder: (child, anim) =>
+              FadeTransition(opacity: anim, child: child),
+          child: _cardFor(device, dumbbellByDevice),
         ),
     ];
 
@@ -234,7 +282,7 @@ class _Body extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (cards.isEmpty)
+          if (orderedDevices.isEmpty)
             const _EmptyHint()
           else ...[
             Expanded(

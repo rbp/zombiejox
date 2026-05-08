@@ -309,6 +309,52 @@ void main() {
     expect(fakes, hasLength(2)); // first attempt failed; second succeeded
   });
 
+  testWidgets(
+      'cards keep their original selection-order slots: retrying a failed '
+      'device does not visually move it past its neighbours', (tester) async {
+    final prefs = await _freshPrefs();
+    final fakes = <_FakeDumbbell>[];
+    final group = WeightGroup(newDumbbell: (d) {
+      // First attempt for AA:01 succeeds; first attempt for AA:02 fails,
+      // second attempt for AA:02 succeeds. The retry test is about whether
+      // AA:02 moves above AA:01 when it transitions failed → connected.
+      final isAa01 = d.remoteId.str == 'AA:01';
+      final attemptsForThisDevice =
+          fakes.where((f) => f.device.remoteId.str == d.remoteId.str).length;
+      final f = _FakeDumbbell(d)
+        ..failConnect = !isAa01 && attemptsForThisDevice == 0;
+      fakes.add(f);
+      return f;
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: ControlScreen(
+        devices: [_device('AA:01'), _device('AA:02')],
+        preferences: prefs,
+        createWeightGroup: () => group,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // Initial state: AA:01 connected on top, AA:02 failed below it.
+    expect(find.byType(FailedDeviceCard), findsOneWidget);
+    expect(tester.getTopLeft(find.text('AA:01')).dy,
+        lessThan(tester.getTopLeft(find.text('AA:02')).dy),
+        reason: 'AA:01 was selected first, must render above AA:02');
+
+    // Retry AA:02 → succeeds. The pre-fix bug: AA:02 would jump to slot 1
+    // because connected cards were rendered before failed ones. With the
+    // fix, the order follows widget.devices, so AA:01 must still be above.
+    await tester.tap(find.byIcon(Icons.refresh));
+    await tester.pumpAndSettle();
+    expect(find.byType(FailedDeviceCard), findsNothing);
+
+    expect(tester.getTopLeft(find.text('AA:01')).dy,
+        lessThan(tester.getTopLeft(find.text('AA:02')).dy),
+        reason: 'after retry, AA:01 must still render above AA:02 — '
+            'the retried card must not jump to the top');
+  });
+
   testWidgets('shows kg labels when preference is kg', (tester) async {
     SharedPreferences.setMockInitialValues({'units': 'kg'});
     final prefs = await Preferences.load();
