@@ -105,7 +105,7 @@ lib/
     dumbbell.dart                   ✅
     weight_group.dart               ✅   N-device fan-out
   state/
-    preferences.dart                ✅   units (reactive ValueListenable) + bluetooth-rationale-shown flag (remembered MACs still TBD)
+    preferences.dart                ✅   units (reactive ValueListenable); remembered-MAC API still TBD
     weights.dart                    ✅   index ↔ lbs ↔ kg lookup, formatWeight() helper
   screens/
     scan_screen.dart                ✅   multi-select + Connect (N) + Settings menu entry
@@ -136,7 +136,7 @@ Android `<uses-permission>` entries (`BLUETOOTH_SCAN` with `neverForLocation`, `
 
 What works:
 - ✅ **First launch**: pre-permission rationale screen ("ZombieJox needs Bluetooth…") → Continue → OS prompt → scan. If the user denies, the screen flips to a "Permission was denied" state with `Open Settings` + `Try again` buttons.
-- ✅ Subsequent launches skip the rationale (a `bluetooth_rationale_shown` flag in Preferences gates this) and go directly to scan.
+- ✅ Routing on every cold start checks the actual `Permission.bluetoothScan` / `bluetoothConnect` status — granted goes straight to scan; revoked-since-last-launch (Android) re-shows the rationale automatically. No flag in Preferences.
 - ✅ **Multi-select on scan**: tick the dumbbells you want, tap "Connect (N)".
 - ✅ **Control screen with N device cards**: one card per connected dumbbell, single weight grid below; one tap fans `0xD6` to all of them.
 - ✅ **Settings**: lbs/kg toggle (reactive — flipping it re-labels everything live across visible screens), link to About. Reachable from a gear icon on both scan and control screens.

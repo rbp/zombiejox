@@ -68,8 +68,6 @@ class _PermissionScreenState extends State<PermissionScreen> {
     final granted = await request();
 
     if (!mounted) return;
-    await widget.preferences.markBluetoothRationaleShown();
-    if (!mounted) return;
 
     if (granted) {
       final onGranted = widget.onGranted ?? widget._defaultOnGranted;

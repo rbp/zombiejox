@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'screens/permission_screen.dart';
 import 'screens/scan_screen.dart';
@@ -7,20 +8,36 @@ import 'state/preferences.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final prefs = await Preferences.load();
-  runApp(ZombieJoxApp(preferences: prefs));
+  final permissionsGranted = await _bluetoothPermissionsGranted();
+  runApp(ZombieJoxApp(
+    preferences: prefs,
+    permissionsGranted: permissionsGranted,
+  ));
+}
+
+/// Quick non-prompting check of the Bluetooth permission state. Used to
+/// decide between the rationale screen (not granted) and going straight to
+/// scan (granted). Re-checked on every cold start so OS-level revocations
+/// re-trigger the rationale.
+Future<bool> _bluetoothPermissionsGranted() async {
+  final scan = await Permission.bluetoothScan.status;
+  final connect = await Permission.bluetoothConnect.status;
+  return scan.isGranted && connect.isGranted;
 }
 
 class ZombieJoxApp extends StatelessWidget {
   final Preferences preferences;
+  final bool permissionsGranted;
 
-  const ZombieJoxApp({super.key, required this.preferences});
+  const ZombieJoxApp({
+    super.key,
+    required this.preferences,
+    required this.permissionsGranted,
+  });
 
   @override
   Widget build(BuildContext context) {
-    // Show the rationale + permission flow once per install. Subsequent
-    // launches go straight to scan — if permission was revoked between
-    // launches, the scan screen has its own re-grant prompt.
-    final home = preferences.hasShownBluetoothRationale
+    final home = permissionsGranted
         ? ScanScreen(preferences: preferences)
         : PermissionScreen(preferences: preferences);
 

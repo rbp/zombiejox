@@ -26,10 +26,8 @@ void main() {
     expect(find.text('Try again'), findsNothing);
   });
 
-  testWidgets('Continue + granted → marks rationale shown and calls onGranted',
-      (tester) async {
+  testWidgets('Continue + granted → calls onGranted', (tester) async {
     final prefs = await _freshPrefs();
-    expect(prefs.hasShownBluetoothRationale, isFalse);
 
     var onGrantedCalled = false;
     await tester.pumpWidget(MaterialApp(
@@ -44,7 +42,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(onGrantedCalled, isTrue);
-    expect(prefs.hasShownBluetoothRationale, isTrue);
   });
 
   testWidgets('Continue + denied → shows the denied state', (tester) async {
@@ -65,10 +62,6 @@ void main() {
     expect(find.text('Open Settings'), findsOneWidget);
     expect(find.text('Try again'), findsOneWidget);
     expect(find.textContaining('Permission was denied'), findsOneWidget);
-
-    // Rationale is still flipped (the user has been past the screen once;
-    // we don't want to re-show it on next launch).
-    expect(prefs.hasShownBluetoothRationale, isTrue);
   });
 
   testWidgets('Try again → returns to the rationale state', (tester) async {

@@ -68,24 +68,4 @@ void main() {
       expect(prefs.getUnit(), prefs.unit.value);
     });
   });
-
-  group('hasShownBluetoothRationale', () {
-    test('defaults to false on a fresh install', () async {
-      final prefs = await Preferences.load();
-      expect(prefs.hasShownBluetoothRationale, isFalse);
-    });
-
-    test('flipped to true by markBluetoothRationaleShown and persists',
-        () async {
-      {
-        final prefs = await Preferences.load();
-        await prefs.markBluetoothRationaleShown();
-        expect(prefs.hasShownBluetoothRationale, isTrue);
-      }
-      {
-        final prefs = await Preferences.load();
-        expect(prefs.hasShownBluetoothRationale, isTrue);
-      }
-    });
-  });
 }
