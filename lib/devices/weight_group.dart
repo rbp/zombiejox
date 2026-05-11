@@ -58,6 +58,13 @@ class WeightGroup {
     } catch (e) {
       _dumbbells.remove(db);
       _emit();
+      // Release the streams + any partially-established BLE handle. The
+      // retry UX is built to be tapped repeatedly, so a forgotten
+      // `disconnect()` here leaked one StreamController + one rxSub per
+      // failed click. `disconnect()` is idempotent and best-effort.
+      try {
+        await db.disconnect();
+      } catch (_) {/* best-effort */}
       rethrow;
     }
   }
@@ -82,14 +89,20 @@ class WeightGroup {
     return Future.wait([for (final d in ready) d.setWeightIndex(index)]);
   }
 
-  /// Disconnect all members and close the change stream.
+  /// Disconnect all members and close the change stream. Best-effort: if
+  /// one member's `disconnect()` throws, the rest are still awaited
+  /// (`eagerError: false`) — teardown wants completion, not first-error
+  /// short-circuiting.
   Future<void> disconnectAll() async {
     if (_disposed) return;
     _disposed = true;
     final all = List<Dumbbell>.from(_dumbbells);
     _dumbbells.clear();
     _emit();
-    await Future.wait(all.map((d) => d.disconnect()));
+    await Future.wait(
+      all.map((d) => d.disconnect()),
+      eagerError: false,
+    );
     await _controller.close();
   }
 
