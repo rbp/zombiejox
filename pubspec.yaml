@@ -41,6 +41,11 @@ flutter_launcher_icons:
 flutter_native_splash:
   color: "#F4ECD4"
   image: "assets/icon-1024.png"
+  # Android 12+ applies a fixed circular mask to the splash icon, so the
+  # source PNG needs transparent padding around the design (otherwise the
+  # corners — and the dumbbell sticking out to the right — get clipped).
+  # `icon-splash-1024.png` is the foreground design rendered at 66.7% of
+  # its canvas; the surrounding transparency absorbs the mask.
   android_12:
     color: "#F4ECD4"
-    image: "assets/icon-foreground-1024.png"
+    image: "assets/icon-splash-1024.png"
