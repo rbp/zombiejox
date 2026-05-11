@@ -34,11 +34,15 @@ class PermissionScreen extends StatefulWidget {
     this.onGranted,
   });
 
+  // Android 12+ uses BLUETOOTH_SCAN with `neverForLocation`, so location is
+  // not requested. On iOS we'd crash without `NSLocationWhenInUseUsageDescription`
+  // in Info.plist, so location is never requested on either platform.
+  // Android ≤11 (where scanning requires ACCESS_FINE_LOCATION) is not
+  // supported by this build — see IMPLEMENTATION_PLAN.md.
   static Future<bool> _defaultRequestPermissions() async {
     final statuses = await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
-      Permission.locationWhenInUse,
     ].request();
     return statuses[Permission.bluetoothScan]?.isGranted == true &&
         statuses[Permission.bluetoothConnect]?.isGranted == true;

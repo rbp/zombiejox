@@ -1,11 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- BLE permissions: API 31+ uses BLUETOOTH_SCAN/CONNECT (no location);
-         API 30 and below need ACCESS_FINE_LOCATION for scanning. -->
+    <!-- BLE permissions: API 31+ uses BLUETOOTH_SCAN/CONNECT with
+         `neverForLocation`, so no location grant is needed. Android ≤11
+         (which needs ACCESS_FINE_LOCATION for scanning) is not supported. -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
-        android:maxSdkVersion="30" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
     <application

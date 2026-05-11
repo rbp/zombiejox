@@ -131,7 +131,7 @@ Total test count: **78 tests, all passing.** `flutter analyze` clean. `dart form
 
 ### 1e. Platform setup — ✅ done
 
-Android `<uses-permission>` entries (`BLUETOOTH_SCAN` with `neverForLocation`, `BLUETOOTH_CONNECT`, `ACCESS_FINE_LOCATION`) and iOS `NSBluetoothAlwaysUsageDescription` are configured per the PR.
+Android `<uses-permission>` entries (`BLUETOOTH_SCAN` with `neverForLocation`, `BLUETOOTH_CONNECT`) and iOS `NSBluetoothAlwaysUsageDescription` are configured per the PR. Android minSdk is 31 (Android 12); Android ≤11 isn't supported because it'd require `ACCESS_FINE_LOCATION` for BLE scanning, which would also require either dropping the privacy-friendly `neverForLocation` flag or maintaining two code paths. iOS does not request `Permission.locationWhenInUse` (which would otherwise crash without `NSLocationWhenInUseUsageDescription` in Info.plist).
 
 ### 1f. User flow — 🟡 most of it works; persistence + edge cases pending
 
