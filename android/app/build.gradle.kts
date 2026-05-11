@@ -24,8 +24,10 @@ android {
         applicationId = "net.isnomore.zombiejox.zombiejox"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        // flutter_blue_plus requires API 21+
-        minSdk = flutter.minSdkVersion
+        // Android 12 (API 31) is the floor: BLUETOOTH_SCAN with
+        // `neverForLocation` only exists from 31, and we don't request
+        // ACCESS_FINE_LOCATION (the ≤30 path for BLE scanning).
+        minSdk = 31
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

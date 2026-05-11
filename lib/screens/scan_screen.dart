@@ -7,6 +7,8 @@ import 'package:permission_handler/permission_handler.dart';
 import '../ble/uuids.dart';
 import '../state/preferences.dart';
 import 'control_screen.dart';
+import 'permission_screen.dart';
+import 'settings_screen.dart';
 
 class ScanScreen extends StatefulWidget {
   final Preferences preferences;
@@ -18,7 +20,6 @@ class ScanScreen extends StatefulWidget {
 }
 
 class _ScanScreenState extends State<ScanScreen> {
-  bool _permissionsGranted = false;
   bool _checking = true;
   final Set<BluetoothDevice> _selected = <BluetoothDevice>{};
 
@@ -28,22 +29,29 @@ class _ScanScreenState extends State<ScanScreen> {
     _ensurePermissions();
   }
 
+  /// Permissions should already be granted by the time the user lands here:
+  /// `main.dart` routes a cold start through [PermissionScreen] when they're
+  /// not, and [PermissionScreen]'s own success path `pushReplacement`'s here.
+  /// This is a defensive backstop for the OS-level-revocation case (the user
+  /// toggles Bluetooth off in Settings.app while the app is alive). On miss,
+  /// we hand control back to [PermissionScreen] rather than re-prompting
+  /// inline — iOS won't re-prompt once denied, so the rationale + Settings
+  /// flow lives in one place.
   Future<void> _ensurePermissions() async {
-    final statuses = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.locationWhenInUse,
-    ].request();
-    final granted = statuses[Permission.bluetoothScan]?.isGranted == true &&
-        statuses[Permission.bluetoothConnect]?.isGranted == true;
+    final scan = await Permission.bluetoothScan.status;
+    final connect = await Permission.bluetoothConnect.status;
+    final granted = scan.isGranted && connect.isGranted;
     if (!mounted) return;
-    setState(() {
-      _permissionsGranted = granted;
-      _checking = false;
-    });
-    if (granted) {
-      _startScan();
+    if (!granted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => PermissionScreen(preferences: widget.preferences),
+        ),
+      );
+      return;
     }
+    setState(() => _checking = false);
+    _startScan();
   }
 
   Future<void> _startScan() async {
@@ -101,34 +109,24 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   Widget build(BuildContext context) {
     if (_checking) {
+      // Brief frame-or-two flash while the async permission check resolves.
+      // On miss we [pushReplacement] to PermissionScreen, so this never
+      // becomes a stuck state.
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-    if (!_permissionsGranted) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('ZombieJox')),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                    'Bluetooth permission is required to find your dumbbells.'),
-                const SizedBox(height: 16),
-                FilledButton(
-                  onPressed: _ensurePermissions,
-                  child: const Text('Grant permission'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
     }
     return Scaffold(
       appBar: AppBar(
         title: const Text('ZombieJox'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => SettingsScreen(preferences: widget.preferences),
+              ),
+            ),
+          ),
           StreamBuilder<bool>(
             stream: FlutterBluePlus.isScanning,
             initialData: false,

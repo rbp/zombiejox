@@ -49,16 +49,17 @@ The BLE protocol is undocumented. One third-party developer (Eamon Tuhami / X8IQ
 
 ---
 
-## Phase 1: Flutter MVP — 🟡 multi-device control merged, settings/about/icon/persistence pending
+## Phase 1: Flutter MVP — 🟡 most of the user flow done; persistence/icon/edge-cases pending
 
-Two PRs have landed against `main`:
+Three PRs have landed against `main`:
 
 - **PR #1** (`e091190`) — initial Flutter scaffold + protocol layer + single-device connect/control + protocol unit tests.
-- **`phase1/multi-device-control` branch** — multi-device foundations (state layer, `WeightGroup`, `ControlScreen` with N-device cards, extracted widgets), 49+ tests covering all of it, plus multi-select on the scan screen so the user can actually connect to ≥ 2 dumbbells in one trip.
+- **PR #2** (`0d322d2`) — multi-device foundations (state layer, `WeightGroup`, `ControlScreen` with N-device cards, extracted widgets), tests, plus multi-select on the scan screen so the user can connect to ≥ 2 dumbbells in one trip.
+- **`phase1/permissions-and-settings` branch** — pre-permission rationale screen, Settings (lbs/kg toggle), About screen, reactive `Preferences` so the toggle takes effect mid-session.
 
-After the multi-device branch merges, the app's user-facing capability is: scan, tick the dumbbells you want, "Connect (N)", control them all together with one weight grid. Locale-default kg labels appear on the buttons in non-US/UK locales.
+After this branch merges, the app's user flow is: pre-permission rationale on first launch → grant → scan → tick dumbbells → "Connect (N)" → control screen with N cards + single weight grid + Settings/About reachable from any screen. Toggling kg/lbs in Settings re-labels everything live.
 
-The remaining MVP gaps — manual lbs/kg toggle UI, settings/about screens, remembered devices, pre-permission rationale, custom app icon, edge-case screens — are tracked in §1h.
+The remaining MVP gaps — remembered devices fast path, custom app icon, edge-case screens — are tracked in §1h.
 
 ### 1a. Create the Flutter project at the repo root — ✅ done
 
@@ -87,11 +88,11 @@ flutter pub run flutter_launcher_icons
 flutter pub run flutter_native_splash:create
 ```
 
-### 1d. Source layout — 🟡 partial (multi-device control done; settings/about/permission screens pending)
+### 1d. Source layout — 🟡 partial (settings/about/permission screens done; remembered-devices/edge-cases pending)
 
 ```
 lib/
-  main.dart                         ✅   loads Preferences async on startup
+  main.dart                         ✅   loads Preferences; gates first-launch on rationale screen
   protocol/
     checksum.dart                   ✅
     frame.dart                      ✅
@@ -104,49 +105,49 @@ lib/
     dumbbell.dart                   ✅
     weight_group.dart               ✅   N-device fan-out
   state/
-    preferences.dart                ✅   units (locale default) + persistence (remembered-MAC API still TBD)
+    preferences.dart                ✅   units (reactive ValueListenable); remembered-MAC API still TBD
     weights.dart                    ✅   index ↔ lbs ↔ kg lookup, formatWeight() helper
   screens/
-    scan_screen.dart                ✅   multi-select with checkboxes + Connect (N) button
-    control_screen.dart             ✅   N device cards + single weight grid (replaces deleted dumbbell_screen.dart)
-    permission_screen.dart          ⏳   pre-permission rationale (critical on iOS)
-    settings_screen.dart            ⏳   units toggle UI
-    about_screen.dart               ⏳   credits + license + version
+    scan_screen.dart                ✅   multi-select + Connect (N) + Settings menu entry
+    control_screen.dart             ✅   N device cards + weight grid (reactive to unit) + Settings menu entry
+    permission_screen.dart          ✅   pre-permission rationale; Continue / denied state with retry / open settings
+    settings_screen.dart            ✅   lbs/kg SegmentedButton toggle + link to About
+    about_screen.dart               ✅   credits + license + protocol-doc reference + disclaimer
   widgets/
     weight_button.dart              ✅
     dumbbell_card.dart              ✅
+    failed_device_card.dart         ✅   shown when a device's connect throws; has a refresh icon to retry inline
 test/
   protocol/                         ✅   checksum_test, frame_test
-  state/                            ✅   weights_test, preferences_test
-  devices/                          ✅   weight_group_test (10 tests)
+  state/                            ✅   weights_test, preferences_test (incl. reactive listener)
+  devices/                          ✅   weight_group_test
   widgets/                          ✅   weight_button_test, dumbbell_card_test
-  screens/                          ✅   control_screen_test, scan_screen_test
+  screens/                          ✅   control_screen_test, scan_screen_test, permission_screen_test, settings_screen_test, about_screen_test
 android/app/src/main/AndroidManifest.xml   ✅
 ios/Runner/Info.plist                       ✅
 ```
 
-Total test count: **53 tests, all passing.** `flutter analyze` clean. `dart format` clean.
+Total test count: **78 tests, all passing.** `flutter analyze` clean. `dart format` clean.
 
 ### 1e. Platform setup — ✅ done
 
-Android `<uses-permission>` entries (`BLUETOOTH_SCAN` with `neverForLocation`, `BLUETOOTH_CONNECT`, `ACCESS_FINE_LOCATION`) and iOS `NSBluetoothAlwaysUsageDescription` are configured per the PR.
+Android `<uses-permission>` entries (`BLUETOOTH_SCAN` with `neverForLocation`, `BLUETOOTH_CONNECT`) and iOS `NSBluetoothAlwaysUsageDescription` are configured per the PR. Android minSdk is 31 (Android 12); Android ≤11 isn't supported because it'd require `ACCESS_FINE_LOCATION` for BLE scanning, which would also require either dropping the privacy-friendly `neverForLocation` flag or maintaining two code paths. iOS does not request `Permission.locationWhenInUse` (which would otherwise crash without `NSLocationWhenInUseUsageDescription` in Info.plist).
 
-### 1f. User flow — 🟡 partial
+### 1f. User flow — 🟡 most of it works; persistence + edge cases pending
 
 What works:
-- ✅ Cold start: OS permission prompt (no rationale screen yet) → scan screen
-- ✅ **Multi-select on scan**: tick the dumbbells you want, tap "Connect (N)"
-- ✅ **Control screen with N device cards**: one card per connected dumbbell, single weight grid below; one tap fans `0xD6` to all of them
-- ✅ Weight buttons render in the user's locale-default unit (lbs in US/UK/LR/MM, kg elsewhere) — driven by `Preferences.getUnit()`
-- ✅ Manual weight changes (via dock buttons) reflected in the UI via `0xD2` byte 11
+- ✅ **First launch**: pre-permission rationale screen ("ZombieJox needs Bluetooth…") → Continue → OS prompt → scan. If the user denies, the screen flips to a "Permission was denied" state with `Open Settings` + `Try again` buttons.
+- ✅ Routing on every cold start checks the actual `Permission.bluetoothScan` / `bluetoothConnect` status — granted goes straight to scan; revoked-since-last-launch (Android) re-shows the rationale automatically. No flag in Preferences.
+- ✅ **Multi-select on scan**: tick the dumbbells you want, tap "Connect (N)".
+- ✅ **Control screen with N device cards**: one card per connected dumbbell, single weight grid below; one tap fans `0xD6` to all of them.
+- ✅ **Settings**: lbs/kg toggle (reactive — flipping it re-labels everything live across visible screens), link to About. Reachable from a gear icon on both scan and control screens.
+- ✅ **About**: credits to Eamon Tuhami / X8IQ, original JaxJox engineering team, link to `docs/ble_protocol.md`, license, disclaimer.
+- ✅ Manual weight changes (via dock buttons) reflected in the UI via `0xD2` byte 11.
 
 What's still needed to hit the MVP target:
-- ⏳ **Pre-permission rationale screen** before invoking the OS prompt (critical on iOS where denied = unrecoverable without going to Settings.app)
-- ⏳ **Warm start with remembered devices**: pinned-at-top, auto-reconnect in parallel
-- ⏳ **Settings screen**: manual lbs/kg toggle UI (the persistence backend is in place; just needs the UI)
-- ⏳ **About screen**: credits + license + protocol-doc link
-- ⏳ **Edge-case screens**: Bluetooth-off, permission-denied, mid-session drops — currently undefined behaviour
-- ⏳ **Custom logo wired into icon and splash**
+- ⏳ **Warm start with remembered devices**: pinned-at-top, auto-reconnect in parallel.
+- ⏳ **Edge-case screens**: Bluetooth-off, all devices out of range, mid-session drops — currently undefined behaviour.
+- ⏳ **Custom logo wired into icon and splash**.
 
 ### 1g. Index ↔ weight lookup
 
@@ -165,23 +166,24 @@ What's still needed to hit the MVP target:
 
 ### 1h. Remaining work to close out Phase 1 (in priority order)
 
-✅ Done in the multi-device-control branch: `shared_preferences` dep; `state/weights.dart`; `state/preferences.dart` (units half — remembered-MAC API not yet); `devices/weight_group.dart`; `screens/control_screen.dart` (replaces `dumbbell_screen.dart`); multi-select on `scan_screen.dart`; reusable widgets `weight_button.dart` + `dumbbell_card.dart`.
+✅ Done across the multi-device-control and permissions-and-settings branches: `shared_preferences`; `state/weights.dart`; reactive `state/preferences.dart` (units); `devices/weight_group.dart`; `widgets/{weight_button,dumbbell_card}.dart`; `screens/{control,scan,permission,settings,about}_screen.dart`; multi-select on the scan screen; settings/about reachable via gear icon.
 
 Still pending:
 
 1. **Custom icon + splash** — add `flutter_launcher_icons` + `flutter_native_splash` dev deps; generate `assets/icon-1024.png` from `zombiejox-logo-bg.svg`; run the generators.
-2. **Pre-permission rationale screen** — `lib/screens/permission_screen.dart`; route to it on cold start before invoking the OS prompt.
-3. **Remembered-device fast path** — extend `state/preferences.dart` with last-connected MAC list; on `scan_screen.dart` cold start, pin remembered devices at the top and kick off auto-reconnect in parallel.
-4. **Settings + About screens** — `lib/screens/settings_screen.dart` (lbs/kg toggle UI; the `Preferences` backend already supports it) and `lib/screens/about_screen.dart` (credits + license + version).
-5. **Edge-case screens** — Bluetooth disabled, permission denied, all devices out of range. Currently undefined behaviour.
+2. **Remembered-device fast path** — extend `state/preferences.dart` with last-connected MAC list; on `scan_screen.dart` cold start, pin remembered devices at the top and kick off auto-reconnect in parallel.
+3. **Edge-case screens** — Bluetooth disabled, permission denied (mid-session revoke), all devices out of range. Currently undefined behaviour.
 
 ### 1i. Out of scope for MVP (deferred)
 
 - Per-dumbbell weight override (asymmetric warmup) — Phase 2+
 - Pushing the unit toggle to the dock physically (need 0f HCI snoop to find the opcode)
 - History sync (`0xD3` / `0xD4`)
-- Username (`0xC0`) — has no effect on motor control
+- Username (`0xC0`) — has no effect on motor control. Will not be implemented at all, unless we discover that there is a functional need.
 - Other JaxJox products (Kettlebell, FoamRoller, PushUp, HRMs)
+
+### Not to be implemented at any point
+
 - Workout / exercise / social features (the original app's cloud "platform" — gone with JaxJox)
 
 ---
@@ -233,28 +235,49 @@ Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case harde
 
 ## Recommended Order of Work
 
-**Phase 0 is complete; Phase 1 multi-device control is merged.** Set + read weight on N dumbbells works end-to-end. Settings/about/icon/persistence/edge-cases remain (see §1h above).
+**Phase 0 is complete; Phase 1 is most of the way through.** Set + read weight on N dumbbells works end-to-end; pre-permission rationale, Settings (lbs/kg toggle), and About are landing in `phase1/permissions-and-settings`. Custom icon, remembered devices, and edge-case screens remain (see §1h above).
 
 1. ✅ Phase 0 reverse-engineering (0a–0e done; 0f deferred as nice-to-have)
 2. 🟡 Phase 1 — Flutter MVP (scaffold + protocol + single-device control merged in PR #1; multi-device control + tests merged in `phase1/multi-device-control`; settings/about/icon/persistence/permission-rationale remaining per §1h)
-3. ⏳ Phase 2 — Polish, error handling, edge-case hardening
-4. ⏳ 0f (optional, low priority) — HCI snoop for kg/lbs toggle opcode and remaining `0xD2` byte semantics
-5. ⏳ Phase 3 — Testing & distribution
+3. ⏳ Phase 2 — UX and UI improvements; make the app a joy to use.
+4. ⏳ Phase 3 — Polish, error handling, edge-case hardening
+5. ⏳ Phase 0/0f — HCI snoop for kg/lbs toggle opcode and remaining `0xD2` byte semantics
+6. ⏳ Phase 3 — Testing & distribution
 
 ---
 
 ## Verification
 
+### Done
+
 - ✅ **Protocol correctness** — `0xD6 <idx>` sent from nRF Connect physically moves the dumbbell across all 8 indices on `DB200-0161997`.
 - ✅ **Protocol unit tests** — `test/protocol/checksum_test.dart` and `test/protocol/frame_test.dart` exercise the checksum algorithm and the frame builder/parser round-trip.
-- ✅ **State + group + widget unit tests** — 53 tests total covering `state/weights`, `state/preferences`, `devices/weight_group`, `widgets/weight_button`, `widgets/dumbbell_card`, `screens/control_screen`, `screens/scan_screen`. Suite runs clean; `flutter analyze` clean.
-- 🟡 **App functionality (MVP gate)**, run from repo root:
-  - ⏳ Splash → permission rationale → OS prompt → scan screen (rationale screen pending)
-  - 🟡 `ScanScreen` multi-select with `Connect (N)` button → `ControlScreen` with N device cards → tapping a weight button fans out to all. Code complete; on-device verification of the multi-select round trip pending.
-  - 🟡 Per-device card shows current weight, motor state, battery; values driven by `0xD2` / `0xD1` notifications. Code complete; on-device verification pending.
-  - 🟡 Weight buttons render in locale-default unit (lbs in US/UK/LR/MM, kg elsewhere). Code complete; on-device check of label rendering pending.
-  - ⏳ Switching to kg in Settings re-labels all buttons (Settings screen UI pending)
-  - ⏳ Killing the app and reopening reconnects automatically (remembered-MAC fast path pending)
-- ✅ **Multi-device fan-out (architectural)** — `WeightGroup.setWeightIndex` fan-out covered by 10 unit tests against a fake-Dumbbell. Real-device verification of two-dumbbell motion pending.
-- ⏳ **Cross-platform** — same flow works on iOS (BLE doesn't work in simulators; physical device required)
-- ⏳ **Edge cases** — toggle Bluetooth off mid-session: cards grey out, recover on re-enable
+- ✅ **State + group + widget + screen unit tests** — 78 tests total covering `state/{weights,preferences}`, `devices/weight_group`, `widgets/{weight_button,dumbbell_card,failed_device_card}`, `screens/{control,scan,permission,settings,about}_screen`. `flutter analyze` clean.
+- ✅ **Multi-device fan-out (architectural)** — `WeightGroup.setWeightIndex` fan-out covered by unit tests against a fake-Dumbbell.
+
+### Pending — needs on-device verification (Android + iOS)
+
+The unit + widget test suites cover the pure-Dart and Flutter-widget layers, but they cannot exercise the BLE platform channels, the OS permission prompt UX, or actual motor motion. These need a **real device** for both platforms:
+
+#### Android (primary dev platform)
+
+- Permission rationale → Continue → OS prompt fires → grant → lands on scan screen.
+- Permission rationale → Continue → OS prompt → deny → lands on the denied-state UI with `Open Settings` and `Try again`.
+- `Try again` reverts to the rationale and re-requests on Continue.
+- Revoke Bluetooth permission via Settings.app, relaunch app: rationale shows again (because `Permission.bluetoothScan.isGranted` is now false). Verifies the routing-on-status logic.
+- Scan finds at least one `DB200` dumbbell when in range.
+- Multi-select two devices → Connect (2) → both connect → control screen shows two cards.
+- Tapping any weight button physically moves the dumbbell(s) to that setting.
+- Tapping "8 lbs" / "50 lbs" hits the extremes correctly.
+- Switching to kg in Settings re-labels every button across both visible screens **without** a navigation round-trip (validates the reactive `Preferences.unit` listener).
+- About screen renders with credits, license, disclaimer, and the `docs/ble_protocol.md` reference visible without scrolling jankiness.
+- Killing and reopening the app: scan finds the same device and a fresh connect-then-set-weight round-trip works.
+- Battery percentage on each card matches what nRF Connect shows for the same device.
+- Bluetooth turned off mid-session: cards grey out / re-enable: cards recover. (This is partially tracked under §1h "edge-case screens" but a pre-shipping spot-check is worth doing.)
+
+#### iOS (verification platform)
+
+- The whole list above on a real iPhone — flutter_blue_plus and `permission_handler` behave subtly differently from Android, and BLE absolutely does not work in the iOS simulator.
+- **Specifically test the permission rationale's first-launch behaviour on iOS.** `permission_handler` reports `denied` for `Permission.bluetoothScan`/`bluetoothConnect` on iOS until the OS has prompted at least once, *but* the OS prompt itself is triggered by `flutter_blue_plus`'s first BLE op (controlled by `NSBluetoothAlwaysUsageDescription` in `ios/Runner/Info.plist`), not by our `permission_handler.request()` call. If the rationale screen doesn't show on first launch, or if Continue feels like a no-op (iOS already reported "granted" so we navigate to scan, then the OS prompt fires from `ScanScreen`'s first BLE call), we'll need to revisit the routing logic — possibly bring back a "rationale shown" flag specifically for iOS. The current implementation assumes iOS reports `denied` on first launch; this is the riskiest unverified assumption in the project right now.
+- The lbs/kg toggle in Settings actually re-labels the buttons live (verifies `ValueListenable` works through the iOS Flutter render path).
+- TestFlight build is producible with the current scaffold.

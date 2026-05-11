@@ -9,7 +9,9 @@ import '../protocol/dumbbell_state.dart';
 import '../state/preferences.dart';
 import '../state/weights.dart';
 import '../widgets/dumbbell_card.dart';
+import '../widgets/failed_device_card.dart';
 import '../widgets/weight_button.dart';
+import 'settings_screen.dart';
 
 /// Screen for controlling N connected dumbbells. The membership comes in
 /// as [devices]; the screen owns the [WeightGroup] lifecycle.
@@ -35,7 +37,12 @@ class ControlScreen extends StatefulWidget {
 class _ControlScreenState extends State<ControlScreen> {
   late final WeightGroup _group =
       widget.createWeightGroup?.call() ?? WeightGroup();
-  final List<Object> _connectErrors = [];
+  // Devices whose most recent connect attempt threw. Each entry persists
+  // until the user taps refresh and the connect either succeeds (entry
+  // removed when the device joins the group) or fails again (entry
+  // replaced). Rendered in-place — the device's slot in the list stays put;
+  // only the card *content* swaps between FailedDeviceCard and DumbbellCard.
+  final Map<BluetoothDevice, Object> _failedDevices = {};
   StreamSubscription<List<Dumbbell>>? _changesSub;
   // Per-dumbbell state subscriptions. We trigger setState on every emission
   // so derived values like `_allReady` and the consensus weight refresh
@@ -73,11 +80,22 @@ class _ControlScreenState extends State<ControlScreen> {
   }
 
   Future<void> _addOne(BluetoothDevice device) async {
+    // We deliberately don't pre-clear an existing _failedDevices entry: the
+    // dumbbell is added to _group synchronously inside _group.add() before
+    // the first await, so by the next build dumbbellByDevice already has it
+    // and the DumbbellCard preempts the FailedDeviceCard via _cardFor's
+    // ordering. Clearing eagerly would briefly leave the slot in neither
+    // map and collapse it (the SizedBox.shrink fallback) for one frame.
     try {
       await _group.add(device);
+      if (!mounted) return;
+      // Connect succeeded — drop any stale failed entry from a prior attempt.
+      if (_failedDevices.containsKey(device)) {
+        setState(() => _failedDevices.remove(device));
+      }
     } catch (e) {
       if (!mounted) return;
-      setState(() => _connectErrors.add(e));
+      setState(() => _failedDevices[device] = e);
     }
   }
 
@@ -97,7 +115,6 @@ class _ControlScreenState extends State<ControlScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final unit = widget.preferences.getUnit();
     final dumbbells = _group.dumbbells;
 
     return Scaffold(
@@ -105,17 +122,33 @@ class _ControlScreenState extends State<ControlScreen> {
         title: const Text('ZombieJox'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => SettingsScreen(preferences: widget.preferences),
+              ),
+            ),
+          ),
+          IconButton(
             icon: const Icon(Icons.bluetooth_disabled),
             tooltip: 'Disconnect all',
             onPressed: _disconnectAndPop,
           ),
         ],
       ),
-      body: _Body(
-        dumbbells: dumbbells,
-        unit: unit,
-        connectErrors: _connectErrors,
-        onSelectIndex: _onSelectIndex,
+      // Listen to unit so toggling lbs ↔ kg in Settings re-labels every
+      // weight button on this screen without a navigation round-trip.
+      body: ValueListenableBuilder<WeightUnit>(
+        valueListenable: widget.preferences.unit,
+        builder: (context, unit, _) => _Body(
+          orderedDevices: widget.devices,
+          dumbbells: dumbbells,
+          unit: unit,
+          failedDevices: _failedDevices,
+          onSelectIndex: _onSelectIndex,
+          onRetry: _addOne,
+        ),
       ),
     );
   }
@@ -141,16 +174,24 @@ class _ControlScreenState extends State<ControlScreen> {
 }
 
 class _Body extends StatelessWidget {
+  // The devices in their original selection order. Cards render in this
+  // order regardless of connection state, so a failed card retrying — which
+  // briefly removes it from `failedDevices` and adds it to `dumbbells` —
+  // doesn't visually move it past its neighbours.
+  final List<BluetoothDevice> orderedDevices;
   final List<Dumbbell> dumbbells;
   final WeightUnit unit;
-  final List<Object> connectErrors;
+  final Map<BluetoothDevice, Object> failedDevices;
   final Future<void> Function(int) onSelectIndex;
+  final Future<void> Function(BluetoothDevice) onRetry;
 
   const _Body({
+    required this.orderedDevices,
     required this.dumbbells,
     required this.unit,
-    required this.connectErrors,
+    required this.failedDevices,
     required this.onSelectIndex,
+    required this.onRetry,
   });
 
   /// The currently-selected weight index, **looking only at ready members**.
@@ -182,39 +223,81 @@ class _Body extends StatelessWidget {
   /// "Connecting…" / "Idle" / "Moving…" state.
   bool _anyReady() => dumbbells.any((d) => d.isReady);
 
+  /// Returns the card that belongs in [device]'s slot right now. Distinct
+  /// [ValueKey]s per state make [AnimatedSwitcher] treat the connected ↔
+  /// failed transitions as a real swap (and cross-fade them) instead of a
+  /// no-op rebuild of the same widget.
+  Widget _cardFor(
+    BluetoothDevice device,
+    Map<BluetoothDevice, Dumbbell> dumbbellByDevice,
+  ) {
+    final dumbbell = dumbbellByDevice[device];
+    if (dumbbell != null) {
+      return DumbbellCard(
+        key: ValueKey('connected-${device.remoteId.str}'),
+        dumbbell: dumbbell,
+        unit: unit,
+      );
+    }
+    final error = failedDevices[device];
+    if (error != null) {
+      return FailedDeviceCard(
+        key: ValueKey('failed-${device.remoteId.str}'),
+        device: device,
+        error: error,
+        onRetry: () => onRetry(device),
+      );
+    }
+    // Should be unreachable: _addOne keeps the failed entry in place until
+    // _group.add either succeeds (dumbbell now in dumbbellByDevice) or fails
+    // (failed entry replaced atomically in the same setState as the removal
+    // from the group). Kept as a defensive zero-height fallback — a visible
+    // placeholder here would itself be the bug.
+    return SizedBox.shrink(
+      key: ValueKey('pending-${device.remoteId.str}'),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final selected = _consensusIndex();
     final moving = _anyMoving();
     final canPress = _anyReady() && !moving;
 
+    // Cards render in [orderedDevices] order so a device retrying — which
+    // briefly leaves [failedDevices] before reappearing in [dumbbells] —
+    // doesn't shuffle past its neighbours. AnimatedSwitcher cross-fades
+    // the card *content* when a device flips between failed / connecting /
+    // connected, while the slot stays put.
+    final dumbbellByDevice = {
+      for (final d in dumbbells) d.device: d,
+    };
+    final cards = <Widget>[
+      for (final device in orderedDevices)
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 250),
+          transitionBuilder: (child, anim) =>
+              FadeTransition(opacity: anim, child: child),
+          child: _cardFor(device, dumbbellByDevice),
+        ),
+    ];
+
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (dumbbells.isEmpty && connectErrors.isEmpty)
+          if (orderedDevices.isEmpty)
             const _EmptyHint()
           else ...[
             Expanded(
               flex: 2,
               child: ListView.separated(
-                itemCount: dumbbells.length,
+                itemCount: cards.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (_, i) => DumbbellCard(
-                  dumbbell: dumbbells[i],
-                  unit: unit,
-                ),
+                itemBuilder: (_, i) => cards[i],
               ),
             ),
-            if (connectErrors.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(
-                  'Failed to connect ${connectErrors.length} device(s).',
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ),
             const SizedBox(height: 8),
             Expanded(
               flex: 3,
