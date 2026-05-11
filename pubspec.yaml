@@ -18,6 +18,34 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.1
+  flutter_native_splash: ^2.4.3
 
 flutter:
   uses-material-design: true
+
+# Re-run after editing:
+#   dart run flutter_launcher_icons
+#   dart run flutter_native_splash:create
+flutter_launcher_icons:
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  image_path: "assets/icon-1024.png"
+  # Android adaptive icons: cream background + transparent foreground so
+  # the design sits inside any launcher mask (circle / squircle / rounded
+  # square) without getting cropped.
+  adaptive_icon_background: "#F4ECD4"
+  adaptive_icon_foreground: "assets/icon-foreground-1024.png"
+
+flutter_native_splash:
+  color: "#F4ECD4"
+  image: "assets/icon-1024.png"
+  # Android 12+ applies a fixed circular mask to the splash icon, so the
+  # source PNG needs transparent padding around the design (otherwise the
+  # corners — and the dumbbell sticking out to the right — get clipped).
+  # `icon-splash-1024.png` is the foreground design rendered at 66.7% of
+  # its canvas; the surrounding transparency absorbs the mask.
+  android_12:
+    color: "#F4ECD4"
+    image: "assets/icon-splash-1024.png"

@@ -73,19 +73,24 @@ Installed:
 - `shared_preferences: ^2.3.0` ✅ (units default + remembered-MAC plumbing)
 - `cupertino_icons: ^1.0.8` (default Flutter cruft)
 
-Not yet installed (needed for remaining UX work):
-- `flutter_launcher_icons` (dev) — for wiring the custom logo into platform icon sets
-- `flutter_native_splash` (dev) — for the splash screen
+Dev dependencies wired in:
+- `flutter_launcher_icons: ^0.14.1` ✅ — generates platform launcher icons from `assets/icon-1024.png` (legacy / iOS) and `assets/icon-foreground-1024.png` (Android adaptive foreground). Cream `#F4ECD4` adaptive-icon background defined in the same `pubspec.yaml` block.
+- `flutter_native_splash: ^2.4.3` ✅ — generates the splash for Android (pre-12 + Android 12+) and iOS, using the same icons + background colour.
 
-### 1c. Assets — icon and splash — ⏳ default Flutter icon still in place
+### 1c. Assets — icon and splash — ✅ done
 
-Platform icon files exist (`android/app/src/main/res/mipmap-*/ic_launcher.png`, `ios/Runner/Assets.xcassets/AppIcon.appiconset/*`) but they're the default Flutter blue logo from `flutter create`, not our zombie. To finish:
+`assets/icon-1024.png` (full-bleed, cream background) and `assets/icon-foreground-1024.png` (transparent foreground, full-bleed — `flutter_launcher_icons` applies the 16% safe-zone inset automatically) are committed alongside the existing `assets/zombiejox-logo*.svg`. The generators run from `pubspec.yaml` and emit:
+
+- Android: `mipmap-*/ic_launcher.png` (non-adaptive), `mipmap-anydpi-v26/ic_launcher.xml` (adaptive: foreground PNG + cream colour), `drawable*/launch_background.xml` and `values-v31/styles.xml` for splash (pre-12 and Android-12+).
+- iOS: every size in `AppIcon.appiconset/`, plus `LaunchImage` and `LaunchScreen.storyboard` for the splash.
+
+Regenerate from a clean checkout:
 
 ```
 rsvg-convert -w 1024 -h 1024 assets/zombiejox-logo-bg.svg -o assets/icon-1024.png
-# add flutter_launcher_icons + flutter_native_splash to dev deps and configure
-flutter pub run flutter_launcher_icons
-flutter pub run flutter_native_splash:create
+rsvg-convert -w 1024 -h 1024 assets/zombiejox-logo.svg    -o assets/icon-foreground-1024.png
+dart run flutter_launcher_icons
+dart run flutter_native_splash:create
 ```
 
 ### 1d. Source layout — 🟡 partial (settings/about/permission screens done; remembered-devices/edge-cases pending)
@@ -147,7 +152,7 @@ What works:
 What's still needed to hit the MVP target:
 - ✅ **Warm start with remembered devices**: on cold start, if `Preferences.rememberedDeviceIds` is non-empty, ScanScreen navigates straight to ControlScreen and kicks off connects in parallel. The remembered set is saved each time the user taps Connect (N). Disconnect-all returns to ScanScreen without re-auto-navigating until the next cold start.
 - ⏳ **Edge-case screens**: Bluetooth-off, all devices out of range, mid-session drops — currently undefined behaviour.
-- ⏳ **Custom logo wired into icon and splash**.
+- ✅ **Custom logo wired into icon and splash** — pixel-art zombie + dumbbell on cream `#F4ECD4`, adaptive on Android (cream background + transparent foreground PNG with launcher-applied 16% safe-zone inset), full-bleed cream on iOS. Splash matches.
 
 ### 1g. Index ↔ weight lookup
 
@@ -170,8 +175,7 @@ What's still needed to hit the MVP target:
 
 Still pending:
 
-1. **Custom icon + splash** — add `flutter_launcher_icons` + `flutter_native_splash` dev deps; generate `assets/icon-1024.png` from `zombiejox-logo-bg.svg`; run the generators.
-2. **Edge-case screens** — Bluetooth disabled, permission denied (mid-session revoke), all devices out of range. Currently undefined behaviour.
+1. **Edge-case screens** — Bluetooth disabled, permission denied (mid-session revoke), all devices out of range. Currently undefined behaviour.
 
 ### 1i. Out of scope for MVP (deferred)
 
