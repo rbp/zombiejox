@@ -214,7 +214,57 @@ Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case harde
 - Better empty / loading / error states
 - Per-device weight override (asymmetric setting), gated behind a Settings toggle
 
-### 2c. ~~kg/lbs unit toggle on the dock~~ — confirmed impossible
+### 2c. About screen improvements
+
+- It should have the logo at the top. Either the app name and below it, the logo; or the other way round.
+- Below "what it is", a link back to the app's Github page
+- Then, "Rodrigo Pimentel <rbp@isnomore.net> started this project"
+- Then, the rest of the README contents, which is what the About screen currently shows.
+
+### 2d. Design - v1
+
+Now it's time to make the app look good.
+
+#### Principles
+
+It should feel modern and smooth. Not too minimalist that it feels cold, but definitely not frilly. It should definitely feel designed, not something that a backend developer would make (i.e., not simple text elements on a white background).
+
+Each dumbbell card should look like a button that's either selected or not (instead of looking like an unstyled html checkbox). The weight buttons should all have the same dimensions, and should be rectangular with slightly rouded corners.
+
+The iOS app https://apps.apple.com/nl/app/jaxjox-connect/id6759603427 is good inspiration. We don't make to make a clone of it, but it has decent design.
+
+#### Overall UX
+
+Currently we show one screen where devices are scanned, select devices, and click "connect". Then we are taken to a screen with the chosen devices (connection pending, may fail or succeed), and from there we can choose the weight for the connected dumbbells.
+
+Instead, how about: after bluetooth permissions are granted, we have one *single* screen. The screen shows, in order:
+1) The cards for the selected or remembered devices; these can be ready, idle, failed or any of the currently available states. If there are no selected devices, this list is empty. The minimum height for even the empty list is the height of two dumbbell cards.
+2) The weights. Selecting a weight changes the weight on all the dumbbells listed about, that are succesfully connected. If there are no dumbbells successfully connected, these weight cards are still there, but disabled.
+3) The list of scanned devices (that aren't yet on the selected list above). Just above this list, to the right, is the stop/re-scan button.
+
+#### Colour themes
+
+Eventually, the app should allow a "light" and a "dark" themes. To beging with, let's make it primarily dark. The primary colour can be a dark aubergine, and you can derive other colours from there.
+
+#### Accessibility
+
+The app should be accessible from the start. There's no reason why someone with a disability shouldn't be able to use it. In particular, the app should be usable if the font is very large.
+
+
+#### Portability
+
+The app should work:
+- On wide phones
+- On narrow phones
+- In portrait and landscape modes
+- On tablets (portrait and landscape)
+- On watches (though that can be deferred, since the UX and UI will need thinking)
+
+#### Misc
+
+The small "stop" / "retry" button on top-right of the scan screen is confusing - especially the "stop" button, which is simply a filled square that looks like an asset is missing. It should have a circle around it, like https://fontawesome.com/icons/duotone/solid/circle-stop
+
+### 2e. ~~kg/lbs unit toggle on the dock~~ — confirmed impossible
 - No app-to-dock unit-write opcode exists (see §1i). The user changes the dock's display unit via its own hidden physical gesture; the app reads the result via `0xD1` byte 8 and auto-matches its own display unit (already done in PR #10).
 
 ---
