@@ -2,7 +2,7 @@
 
 Reverse-engineered from decompiled `com.jaxjox.mobile` v3.1.0 APK. All paths below are relative to `reverse-engineering/decompiled/sources/`.
 
-> **Status**: Set-weight + status query + time-sync + username are all validated end-to-end against a real DumbbellConnect (`DB200-0161997`, hardware V1.0, firmware V1.0, software V1.1.4db). Setting a weight from the app side physically moves the dumbbell. The `0xD1` byte-8 unit byte is decoded and on-device-confirmed (`0x00` = lbs, `0x01` = kg). Open items: exact meaning of `0xD1` byte 5 (Java field name `battery` but doesn't match the user-facing % — see below), `0xD2` 24-bit fields (likely reps/volume/power, untested without a workout), history sync (opcodes `0xD3`/`0xD4`). **There is no app-to-dock kg/lbs push opcode** — the decompiled code shows the app's unit toggle is purely a display preference, not a BLE write; the user changes the dock's unit via a hidden gesture on the dock itself.
+> **Status**: Set-weight + status query + time-sync + username are all validated end-to-end against a real DumbbellConnect (`DB200-0161997`, hardware V1.0, firmware V1.0, software V1.1.4db). Setting a weight from the app side physically moves the dumbbell. The `0xD1` byte-8 unit byte is decoded and on-device-confirmed (`0x00` = lbs, `0x01` = kg). Open items: exact meaning of `0xD1` byte 5 (Java field name `battery` but doesn't match the user-facing % — see below), `0xD2` 24-bit fields (likely reps/volume/power, untested without a workout), history sync (opcodes `0xD3`/`0xD4`). **There is no app-to-dock kg/lbs push opcode** — the decompiled code shows the app's unit toggle is purely a display preference, not a BLE write; the user changes the dock's unit via the dock itself.
 
 ---
 
