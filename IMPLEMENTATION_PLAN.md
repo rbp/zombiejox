@@ -44,7 +44,7 @@ The BLE protocol is undocumented. One third-party developer (Eamon Tuhami / X8IQ
 
 ### 0f. (Optional) HCI snoop for residual unknowns — ✅ closed via static analysis + on-device probe
 - **kg/lbs unit toggle**: no opcode exists for the dumbbell. The decompiled `EditUnitMeasureFragment` / `UserManager.setWeightUnit` write to a SharedPreferences key only; `FitnessManager` (the BLE-write class) has zero unit references. The dock has its own hidden physical kg/lbs gesture; the app reads the current dock unit from `0xD1` byte 8 but never writes one. (The smart scale `SmartScaleManager.onSyncUnit` is a different device class.)
-- **`0xD1` byte semantics**: fully recovered from `DumbBellReceivedDataCallback.h1(...)` + `DeviceStatus` field names (see `docs/ble_protocol.md` §`0xD1` byte semantics). Byte 8 (`unit`) mapping confirmed on-device via the debug-log probe wired in PR #9: **`0x00` = lbs, `0x01` = kg**. Byte 5 (`battery` per the APK name, but values don't match the user-facing %) is still unexplained, though it's not used by the app and doesn't block anything.
+- **`0xD1` byte semantics**: fully recovered from `DumbBellReceivedDataCallback.h1(...)` + `DeviceStatus` field names (see `docs/ble_protocol.md` §`0xD1` byte semantics). Byte 8 (`unit`) mapping confirmed on-device: **`0x00` = lbs, `0x01` = kg**. Byte 5 (`battery` per the APK name, but values don't match the user-facing %) is still unexplained, though it's not used by the app and doesn't block anything.
 - **`0xD2` 24-bit fields**: per `ChangedManager.U0` log line, bytes 4–6 = time, byte 7 = flag, bytes 8–10 = count, byte 11 = weight index, bytes 12–13 = unknown. Workout-specific; not relevant for MVP.
 - HCI snoop of the original app is blocked anyway — JaxJox cloud is gone, the app can't get past its login wall.
 
@@ -264,7 +264,7 @@ The app should work:
 The small "stop" / "retry" button on top-right of the scan screen is confusing - especially the "stop" button, which is simply a filled square that looks like an asset is missing. It should have a circle around it, like https://fontawesome.com/icons/duotone/solid/circle-stop
 
 ### 2e. ~~kg/lbs unit toggle on the dock~~ — confirmed impossible
-- No app-to-dock unit-write opcode exists (see §1i). The user changes the dock's display unit via its own hidden physical gesture; the app reads the result via `0xD1` byte 8 and auto-matches its own display unit (already done in PR #10).
+- No app-to-dock unit-write opcode exists (see §1i → *Confirmed impossible*). The user changes the dock's display unit via its own hidden physical gesture; the app reads the result via `0xD1` byte 8 and auto-matches its own display unit (already done in PR #10).
 
 ---
 
