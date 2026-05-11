@@ -136,9 +136,11 @@ class _ControlScreenState extends State<ControlScreen> {
         ready.length + _failedDevices.length >= widget.devices.length;
     _autoMatchTimer?.cancel();
     if (allAccountedFor) {
-      _decideAutoMatch();
+      unawaited(_decideAutoMatch());
     } else {
-      _autoMatchTimer = Timer(_autoMatchDebounce, _decideAutoMatch);
+      _autoMatchTimer = Timer(_autoMatchDebounce, () {
+        unawaited(_decideAutoMatch());
+      });
     }
   }
 
@@ -146,38 +148,50 @@ class _ControlScreenState extends State<ControlScreen> {
   /// Three outcomes: agreement (auto-set the app unit + SnackBar if it
   /// actually changed), disagreement (SnackBar pointing the user to
   /// Settings), or all-unknown (no-op).
+  ///
+  /// Fire-and-forget — callers `unawaited` this. Any exception (e.g. a
+  /// `SharedPreferences` write failure) is swallowed inside; the
+  /// decision flag is already set by then, so we can't usefully retry,
+  /// and a UX nicety isn't worth crashing the screen over.
   Future<void> _decideAutoMatch() async {
     if (_autoMatchDecided) return;
     _autoMatchDecided = true;
     if (widget.preferences.unitExplicitlyChosen) return;
 
-    final units = <WeightUnit>{};
-    for (final d in _group.dumbbells.where((d) => d.isReady)) {
-      final u = weightUnitFromRawByte(d.lastState?.unitRaw);
-      if (u != null) units.add(u);
-    }
+    try {
+      final units = <WeightUnit>{};
+      for (final d in _group.dumbbells.where((d) => d.isReady)) {
+        final u = weightUnitFromRawByte(d.lastState?.unitRaw);
+        if (u != null) units.add(u);
+      }
 
-    if (units.length == 1) {
-      final u = units.single;
-      final changed = await widget.preferences.setUnitIfNotExplicit(u);
-      if (!mounted) return;
-      if (changed) {
-        final label = u == WeightUnit.lbs ? 'lbs' : 'kg';
+      if (units.length == 1) {
+        final u = units.single;
+        final changed = await widget.preferences.setUnitIfNotExplicit(u);
+        if (!mounted) return;
+        if (changed) {
+          final label = u == WeightUnit.lbs ? 'lbs' : 'kg';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Set to $label to match your dumbbells.')),
+          );
+        }
+      } else if (units.length > 1) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Set to $label to match your dumbbells.')),
+          const SnackBar(
+            content: Text(
+                'Your dumbbells are set to different units — pick one in Settings.'),
+          ),
         );
       }
-    } else if (units.length > 1) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              'Your dumbbells are set to different units — pick one in Settings.'),
-        ),
-      );
+      // units.isEmpty: every ready member reported an unknown unit byte.
+      // Don't guess — leave the app's display unit at whatever it was.
+    } catch (e, st) {
+      // A SharedPreferences write failure or a build-context shenanigan
+      // shouldn't tear the screen down. Decision is already marked
+      // fired, so we won't retry — log and move on.
+      debugPrint('auto-match decision failed: $e\n$st');
     }
-    // units.isEmpty: every ready member reported an unknown unit byte.
-    // Don't guess — leave the app's display unit at whatever it was.
   }
 
   Future<void> _addOne(BluetoothDevice device) async {

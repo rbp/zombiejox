@@ -45,11 +45,17 @@ class Preferences {
   /// User-facing setter — flips [unitExplicitlyChosen] to true regardless
   /// of whether the value actually changed (the user tapped the toggle;
   /// even a re-tap of the current value counts as an explicit choice).
+  ///
+  /// Always persists the unit string too, even if it equals the current
+  /// in-memory value — otherwise an explicit re-tap on a fresh install
+  /// (where `_keyUnit` is still unset) would leave `_keyUnit` unset and
+  /// a future launch in a different locale could re-derive a unit that
+  /// disagrees with the user's choice.
   Future<void> setUnit(WeightUnit unit) async {
     await _prefs.setBool(_keyUnitExplicit, true);
+    await _prefs.setString(_keyUnit, unit.name);
     if (_unit.value == unit) return;
     _unit.value = unit;
-    await _prefs.setString(_keyUnit, unit.name);
   }
 
   /// Auto-match setter — used by ControlScreen when all connected

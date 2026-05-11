@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import '../ble/ble_service.dart';
@@ -18,7 +17,8 @@ class Dumbbell {
   final BleConnection _ble;
   final BluetoothDevice device;
 
-  final StreamController<DumbbellState> _states = StreamController<DumbbellState>.broadcast();
+  final StreamController<DumbbellState> _states =
+      StreamController<DumbbellState>.broadcast();
   Stream<DumbbellState> get states => _states.stream;
 
   DumbbellState? _last;
@@ -65,7 +65,8 @@ class Dumbbell {
     final battery = await _ble.readBatteryLevel();
     if (_disposed) return;
     if (battery != null && !_states.isClosed) {
-      _last = (_last ?? const DumbbellState(weightIndex: 0, motorActive: false)).copyWith(batteryPct: battery);
+      _last = (_last ?? const DumbbellState(weightIndex: 0, motorActive: false))
+          .copyWith(batteryPct: battery);
       _states.add(_last!);
     }
   }
@@ -97,7 +98,6 @@ class Dumbbell {
     if (_disposed) return;
     final frame = parseFrame(bytes);
     if (frame == null) return;
-    final prevUnit = _last?.unitRaw;
     final next = applyFrame(_last, frame);
     if (next != null && !_states.isClosed) {
       _last = next;

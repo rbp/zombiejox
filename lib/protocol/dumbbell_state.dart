@@ -15,11 +15,12 @@ class DumbbellState {
   /// Raw "unit" byte from the `0xD1` reply (frame byte 8). The original
   /// JaxJox app receives this value but never compares it to any
   /// constant — `ChangedManager` just forwards it through a logger — so
-  /// the `0 = lbs / 1 = kg` (or reverse) mapping isn't recoverable from
-  /// the decompiled code and needs on-device confirmation. Once the
-  /// mapping is known, ControlScreen can auto-match the app's display
-  /// unit to the dock's. Null on states that didn't come from a `0xD1`
-  /// frame — `0xD2` periodic broadcasts don't carry the unit byte.
+  /// the mapping had to be recovered on-device. **Confirmed:** `0x00`
+  /// = lbs, `0x01` = kg; see [weightUnitFromRawByte] for the conversion
+  /// to [WeightUnit] (returns null for any unexpected value so callers
+  /// can treat "unknown" as "don't guess"). Null on states that didn't
+  /// come from a `0xD1` frame — `0xD2` periodic broadcasts don't carry
+  /// the unit byte.
   final int? unitRaw;
 
   const DumbbellState({

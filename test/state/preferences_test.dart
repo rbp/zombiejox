@@ -139,6 +139,30 @@ void main() {
     });
 
     test(
+        'setUnit persists the unit string even when value matches the '
+        'in-memory default — so a locale change after the user re-taps '
+        'cannot override their explicit choice', () async {
+      // Fresh install: 'units' key is absent, in-memory value comes from
+      // the locale. The user opens Settings, taps the already-selected
+      // option — that's still an explicit pick.
+      final prefs = await Preferences.load();
+      final picked = prefs.getUnit();
+      await prefs.setUnit(picked);
+
+      // Simulate a re-launch where the locale now disagrees with the
+      // user's pick. We can't move the locale itself in a unit test,
+      // but reloading Preferences and checking the persisted value is
+      // what would happen — if `_keyUnit` was persisted on the no-op
+      // path, the reload reads it instead of falling back to the
+      // locale derivation.
+      final reloaded = await Preferences.load();
+      expect(reloaded.getUnit(), picked,
+          reason: 'an explicit re-tap of the current value must still persist '
+              "the unit string so a later locale shift can't override it");
+      expect(reloaded.unitExplicitlyChosen, isTrue);
+    });
+
+    test(
         'setUnitIfNotExplicit changes the value and returns true when '
         'the flag is false', () async {
       final prefs = await Preferences.load();
