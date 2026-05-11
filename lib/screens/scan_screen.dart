@@ -13,7 +13,25 @@ import 'settings_screen.dart';
 class ScanScreen extends StatefulWidget {
   final Preferences preferences;
 
-  const ScanScreen({super.key, required this.preferences});
+  /// Override the Bluetooth-permission status check — used by widget tests
+  /// to avoid the `permission_handler` platform channel. In production
+  /// this is null and the screen reads `Permission.bluetoothScan.status`
+  /// + `bluetoothConnect.status` directly.
+  final Future<bool> Function()? checkPermissionsGranted;
+
+  /// Override the route that's pushed for the connected devices — used by
+  /// widget tests so we don't actually pump a real ControlScreen (whose
+  /// `initState` would hit BLE platform channels). In production this is
+  /// null and the screen pushes a [ControlScreen].
+  final Widget Function(BuildContext context, List<BluetoothDevice> devices,
+      VoidCallback onAnyConnected)? controlScreenBuilder;
+
+  const ScanScreen({
+    super.key,
+    required this.preferences,
+    this.checkPermissionsGranted,
+    this.controlScreenBuilder,
+  });
 
   @override
   State<ScanScreen> createState() => _ScanScreenState();
@@ -41,10 +59,15 @@ class _ScanScreenState extends State<ScanScreen> {
   /// we hand control back to [PermissionScreen] rather than re-prompting
   /// inline — iOS won't re-prompt once denied, so the rationale + Settings
   /// flow lives in one place.
-  Future<void> _ensurePermissions() async {
+  static Future<bool> _defaultCheckPermissionsGranted() async {
     final scan = await Permission.bluetoothScan.status;
     final connect = await Permission.bluetoothConnect.status;
-    final granted = scan.isGranted && connect.isGranted;
+    return scan.isGranted && connect.isGranted;
+  }
+
+  Future<void> _ensurePermissions() async {
+    final granted = await (widget.checkPermissionsGranted ??
+        _defaultCheckPermissionsGranted)();
     if (!mounted) return;
     if (!granted) {
       Navigator.of(context).pushReplacement(
@@ -75,13 +98,21 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   Future<void> _startScan() async {
-    if (FlutterBluePlus.isScanningNow) {
-      await FlutterBluePlus.stopScan();
+    // The BLE adapter can fail to start a scan for reasons we can't
+    // recover from inline (Bluetooth got turned off, adapter is in an
+    // odd state, platform channel error). Swallow + log; the user has a
+    // refresh icon they can hit once the underlying issue is fixed.
+    try {
+      if (FlutterBluePlus.isScanningNow) {
+        await FlutterBluePlus.stopScan();
+      }
+      await FlutterBluePlus.startScan(
+        withKeywords: kJaxJoxNamePrefixes.values.toList(),
+        timeout: const Duration(seconds: 30),
+      );
+    } catch (e, st) {
+      debugPrint('startScan failed: $e\n$st');
     }
-    await FlutterBluePlus.startScan(
-      withKeywords: kJaxJoxNamePrefixes.values.toList(),
-      timeout: const Duration(seconds: 30),
-    );
   }
 
   void _toggleSelected(BluetoothDevice device) {
@@ -97,25 +128,43 @@ class _ScanScreenState extends State<ScanScreen> {
   Future<void> _onConnect() async {
     if (_selected.isEmpty) return;
     final devices = _selected.toList();
-    await FlutterBluePlus.stopScan();
+    // Same as _startScan — don't let an adapter-state error stall us.
+    try {
+      await FlutterBluePlus.stopScan();
+    } catch (e, st) {
+      debugPrint('stopScan failed pre-navigate: $e\n$st');
+    }
     await _navigateToControl(devices);
   }
 
-  /// Saves the selection as the remembered set (so a warm restart skips
-  /// the scan step), pushes ControlScreen, and on return restarts scanning
-  /// for the next pick. Shared between the manual "Connect (N)" tap and
-  /// the auto-connect-on-cold-start path.
+  /// Pushes ControlScreen for the given devices and, on return, restarts
+  /// scanning for the next pick. Saves the device set to
+  /// remembered-storage via the ControlScreen `onAnyConnected` callback,
+  /// which fires only after the first member verifiably reaches
+  /// `isReady` — so a Connect-tap that fails on every device (e.g. they're
+  /// all out of range) never poisons the warm-start fast path. Shared
+  /// between the manual "Connect (N)" tap and the auto-connect-on-cold-
+  /// start path.
   Future<void> _navigateToControl(List<BluetoothDevice> devices) async {
-    await widget.preferences.setRememberedDeviceIds(
-      [for (final d in devices) d.remoteId.str],
-    );
     if (!mounted) return;
+    void rememberOnConnect() => unawaited(
+          widget.preferences.setRememberedDeviceIds(
+            [for (final d in devices) d.remoteId.str],
+          ),
+        );
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ControlScreen(
-          devices: devices,
-          preferences: widget.preferences,
-        ),
+        builder: (ctx) =>
+            widget.controlScreenBuilder?.call(
+              ctx,
+              devices,
+              rememberOnConnect,
+            ) ??
+            ControlScreen(
+              devices: devices,
+              preferences: widget.preferences,
+              onAnyConnected: rememberOnConnect,
+            ),
       ),
     );
     if (!mounted) return;
@@ -130,9 +179,14 @@ class _ScanScreenState extends State<ScanScreen> {
 
   @override
   void dispose() {
-    if (FlutterBluePlus.isScanningNow) {
-      FlutterBluePlus.stopScan();
-    }
+    // Best-effort: dispose can't await, and a plugin-channel failure here
+    // would be a useless crash since we're tearing down anyway. Both the
+    // synchronous getter and the async future are guarded.
+    try {
+      if (FlutterBluePlus.isScanningNow) {
+        unawaited(FlutterBluePlus.stopScan().catchError((_) {}));
+      }
+    } catch (_) {}
     super.dispose();
   }
 

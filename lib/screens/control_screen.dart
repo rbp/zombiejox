@@ -23,11 +23,19 @@ class ControlScreen extends StatefulWidget {
   final Preferences preferences;
   final WeightGroup Function()? createWeightGroup;
 
+  /// Fires exactly once, the first time any group member reaches
+  /// [Dumbbell.isReady]. Lets the pusher (e.g. [ScanScreen]) commit the
+  /// device set to remembered-storage only after a verified successful
+  /// connect, rather than speculatively before navigation — so a
+  /// failed-to-connect set never poisons the warm-start fast path.
+  final VoidCallback? onAnyConnected;
+
   const ControlScreen({
     super.key,
     required this.devices,
     required this.preferences,
     this.createWeightGroup,
+    this.onAnyConnected,
   });
 
   @override
@@ -48,6 +56,7 @@ class _ControlScreenState extends State<ControlScreen> {
   // so derived values like `_allReady` and the consensus weight refresh
   // promptly — `_group.changes` only fires on membership changes.
   final Map<Dumbbell, StreamSubscription<DumbbellState>> _stateSubs = {};
+  bool _onAnyConnectedFired = false;
 
   @override
   void initState() {
@@ -73,10 +82,24 @@ class _ControlScreenState extends State<ControlScreen> {
         d,
         () => d.states.listen((_) {
           if (mounted) setState(() {});
+          _maybeFireOnAnyConnected();
         }),
       );
     }
     if (mounted) setState(() {});
+    _maybeFireOnAnyConnected();
+  }
+
+  /// Fires [ControlScreen.onAnyConnected] exactly once, the first time any
+  /// member reaches [Dumbbell.isReady]. Hooked from both [_onMembership]
+  /// (in case a member is already ready when membership changes) and each
+  /// per-member state-stream listener (the usual path — `isReady` becomes
+  /// true when the first `0xD2` state notification arrives).
+  void _maybeFireOnAnyConnected() {
+    if (_onAnyConnectedFired) return;
+    if (!_group.dumbbells.any((d) => d.isReady)) return;
+    _onAnyConnectedFired = true;
+    widget.onAnyConnected?.call();
   }
 
   Future<void> _addOne(BluetoothDevice device) async {

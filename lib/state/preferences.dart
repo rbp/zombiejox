@@ -41,11 +41,16 @@ class Preferences {
     await _prefs.setString(_keyUnit, unit.name);
   }
 
-  /// Remote IDs of the dumbbells from the user's most recent successful
-  /// "Connect (N)" tap on the scan screen. Used to skip the scan step on
-  /// warm start — read by `ScanScreen._ensurePermissions` to decide
-  /// whether to auto-navigate straight to ControlScreen. Empty before the
-  /// first ever connect.
+  /// Remote IDs of the dumbbells from the user's most recent *verified*
+  /// successful connect — written only after at least one member of the
+  /// connected group reaches `Dumbbell.isReady` (via the `onAnyConnected`
+  /// callback ScanScreen hooks into ControlScreen). A Connect-tap that
+  /// fails on every device never updates this list, so warm-start
+  /// auto-navigation always tries to reconnect to a set that has worked
+  /// at least once before. Used to skip the scan step on warm start —
+  /// read by `ScanScreen._ensurePermissions` to decide whether to
+  /// auto-navigate straight to ControlScreen. Empty before the first
+  /// verified successful connect.
   ///
   /// We persist plain `remoteId.str` values rather than serialised
   /// `BluetoothDevice`s because `flutter_blue_plus` can rehydrate a

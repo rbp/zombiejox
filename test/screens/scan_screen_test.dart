@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zombiejox/screens/scan_screen.dart';
+import 'package:zombiejox/state/preferences.dart';
 
 BluetoothDevice _device(String id) =>
     BluetoothDevice(remoteId: DeviceIdentifier(id));
@@ -128,5 +130,112 @@ void main() {
     await tester.pump();
 
     expect(toggled, equals(dev));
+  });
+
+  // ScanScreen-level (full widget) tests. These cover the cold-start
+  // routing decision: remembered devices → auto-navigate to ControlScreen
+  // and let it commit them post-connect; no remembered devices → fall
+  // through to the scan UI. We inject the permission check + the
+  // ControlScreen builder so the test doesn't hit BLE / permission
+  // platform channels.
+
+  group('ScanScreen auto-connect routing', () {
+    testWidgets(
+        'remembered IDs + permissions granted → pushes the control route '
+        'with the rehydrated devices in the saved order', (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'units': 'lbs',
+        'remembered_device_ids': ['AA:01', 'AA:02'],
+      });
+      final prefs = await Preferences.load();
+
+      List<BluetoothDevice>? capturedDevices;
+      await tester.pumpWidget(MaterialApp(
+        home: ScanScreen(
+          preferences: prefs,
+          checkPermissionsGranted: () async => true,
+          controlScreenBuilder: (ctx, devices, _) {
+            capturedDevices = devices;
+            return const Scaffold(body: Text('STUB CONTROL'));
+          },
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('STUB CONTROL'), findsOneWidget);
+      expect(capturedDevices, isNotNull);
+      expect(capturedDevices!.map((d) => d.remoteId.str).toList(),
+          ['AA:01', 'AA:02']);
+    });
+
+    testWidgets(
+        'the onAnyConnected callback handed to ControlScreen is the one '
+        'that persists the remembered set (post-success, not pre-push)',
+        (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'units': 'lbs',
+        'remembered_device_ids': ['AA:01'],
+      });
+      final prefs = await Preferences.load();
+
+      VoidCallback? capturedOnConnected;
+      await tester.pumpWidget(MaterialApp(
+        home: ScanScreen(
+          preferences: prefs,
+          checkPermissionsGranted: () async => true,
+          controlScreenBuilder: (ctx, devices, onAnyConnected) {
+            capturedOnConnected = onAnyConnected;
+            return const Scaffold(body: Text('STUB CONTROL'));
+          },
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      // Wipe the persisted set so we can prove the callback is what
+      // re-persists, not some earlier eager save.
+      await prefs.setRememberedDeviceIds(const []);
+      expect(prefs.rememberedDeviceIds, isEmpty);
+
+      capturedOnConnected!();
+      await tester.pumpAndSettle();
+      expect(prefs.rememberedDeviceIds, ['AA:01']);
+    });
+
+    testWidgets(
+        'sticky after pop: the auto-connect path fires once per cold start, '
+        'not again when the user comes back via Disconnect-all',
+        (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'units': 'lbs',
+        'remembered_device_ids': ['AA:01'],
+      });
+      final prefs = await Preferences.load();
+
+      var pushCount = 0;
+      await tester.pumpWidget(MaterialApp(
+        home: ScanScreen(
+          preferences: prefs,
+          checkPermissionsGranted: () async => true,
+          controlScreenBuilder: (ctx, devices, _) {
+            pushCount++;
+            // Pop immediately so we land back on the scan screen and can
+            // observe whether the routing fires a *second* time.
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              Navigator.of(ctx).pop();
+            });
+            return const Scaffold(body: Text('STUB CONTROL'));
+          },
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      // The auto-connect routing must NOT re-fire after the pop. If it
+      // did, pushCount would be > 1 (and we'd be in an infinite push/pop
+      // loop). The screen should be sitting on the scan UI now — we
+      // don't assert on what the scan UI shows because that path touches
+      // FlutterBluePlus, but we can prove the routing decision didn't
+      // recur.
+      expect(pushCount, 1);
+    });
   });
 }
