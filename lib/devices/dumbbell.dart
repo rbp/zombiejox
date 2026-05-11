@@ -18,8 +18,7 @@ class Dumbbell {
   final BleConnection _ble;
   final BluetoothDevice device;
 
-  final StreamController<DumbbellState> _states =
-      StreamController<DumbbellState>.broadcast();
+  final StreamController<DumbbellState> _states = StreamController<DumbbellState>.broadcast();
   Stream<DumbbellState> get states => _states.stream;
 
   DumbbellState? _last;
@@ -66,8 +65,7 @@ class Dumbbell {
     final battery = await _ble.readBatteryLevel();
     if (_disposed) return;
     if (battery != null && !_states.isClosed) {
-      _last = (_last ?? const DumbbellState(weightIndex: 0, motorActive: false))
-          .copyWith(batteryPct: battery);
+      _last = (_last ?? const DumbbellState(weightIndex: 0, motorActive: false)).copyWith(batteryPct: battery);
       _states.add(_last!);
     }
   }
@@ -104,20 +102,6 @@ class Dumbbell {
     if (next != null && !_states.isClosed) {
       _last = next;
       _states.add(next);
-      // One-shot probe: surface the dock's "unit" byte the first time we
-      // see it for this device, and again whenever it changes. The
-      // mapping (which value == lbs vs kg) isn't in the original APK —
-      // the Java code receives the byte but never compares it to a
-      // constant — so on-device observation is the only way to nail it
-      // down. Flip the physical kg/lbs button on the dock and watch the
-      // log to confirm.
-      if (next.unitRaw != null && next.unitRaw != prevUnit) {
-        debugPrint(
-          '[dumbbell ${device.remoteId.str}] '
-          '0xD1 unit byte = 0x${next.unitRaw!.toRadixString(16).padLeft(2, '0')} '
-          '(${next.unitRaw})',
-        );
-      }
     }
   }
 }
