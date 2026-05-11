@@ -355,6 +355,82 @@ void main() {
             'the retried card must not jump to the top');
   });
 
+  testWidgets(
+      'onAnyConnected fires exactly once when the first member becomes ready '
+      '— and not on subsequent state emissions or members becoming ready',
+      (tester) async {
+    final prefs = await _freshPrefs();
+    final fakes = <_FakeDumbbell>[];
+    final group = WeightGroup(newDumbbell: (d) {
+      final f = _FakeDumbbell(d);
+      fakes.add(f);
+      return f;
+    });
+
+    var fired = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: ControlScreen(
+        devices: [_device('AA:01'), _device('AA:02')],
+        preferences: prefs,
+        createWeightGroup: () => group,
+        onAnyConnected: () => fired++,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(fired, 0,
+        reason: 'no state has been emitted yet → no member is ready');
+
+    // First state on the first fake → fires once.
+    fakes[0].emitState(
+      const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
+    );
+    await tester.pumpAndSettle();
+    expect(fired, 1);
+
+    // Subsequent state emissions on the same fake → no re-fire.
+    fakes[0].emitState(
+      const DumbbellState(weightIndex: 1, motorActive: false, batteryPct: 80),
+    );
+    await tester.pumpAndSettle();
+    expect(fired, 1);
+
+    // The second fake becoming ready also doesn't re-fire — it's
+    // once-per-screen, not once-per-member. ScanScreen wants the device
+    // set committed to remembered-storage exactly once, on the first
+    // verified successful connect of *any* member.
+    fakes[1].emitState(
+      const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
+    );
+    await tester.pumpAndSettle();
+    expect(fired, 1);
+  });
+
+  testWidgets(
+      'onAnyConnected never fires when every member fails to connect '
+      '— so a failed Connect-tap does not poison the remembered set',
+      (tester) async {
+    final prefs = await _freshPrefs();
+    final group = WeightGroup(newDumbbell: (d) {
+      final f = _FakeDumbbell(d)..failConnect = true;
+      return f;
+    });
+
+    var fired = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: ControlScreen(
+        devices: [_device('AA:01'), _device('AA:02')],
+        preferences: prefs,
+        createWeightGroup: () => group,
+        onAnyConnected: () => fired++,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(fired, 0,
+        reason: 'all members failed to connect → no member ever ready');
+  });
+
   testWidgets('shows kg labels when preference is kg', (tester) async {
     SharedPreferences.setMockInitialValues({'units': 'kg'});
     final prefs = await Preferences.load();

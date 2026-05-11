@@ -110,7 +110,7 @@ lib/
     dumbbell.dart                   ✅
     weight_group.dart               ✅   N-device fan-out
   state/
-    preferences.dart                ✅   units (reactive ValueListenable); remembered-MAC API still TBD
+    preferences.dart                ✅   units (reactive ValueListenable); remembered device IDs
     weights.dart                    ✅   index ↔ lbs ↔ kg lookup, formatWeight() helper
   screens/
     scan_screen.dart                ✅   multi-select + Connect (N) + Settings menu entry
@@ -132,7 +132,7 @@ android/app/src/main/AndroidManifest.xml   ✅
 ios/Runner/Info.plist                       ✅
 ```
 
-Total test count: **78 tests, all passing.** `flutter analyze` clean. `dart format` clean.
+Total test count: **83 tests, all passing.** `flutter analyze` clean. `dart format` clean.
 
 ### 1e. Platform setup — ✅ done
 
@@ -150,7 +150,7 @@ What works:
 - ✅ Manual weight changes (via dock buttons) reflected in the UI via `0xD2` byte 11.
 
 What's still needed to hit the MVP target:
-- ⏳ **Warm start with remembered devices**: pinned-at-top, auto-reconnect in parallel. (In flight on `phase1/remembered-devices`.)
+- ✅ **Warm start with remembered devices**: on cold start, if `Preferences.rememberedDeviceIds` is non-empty, ScanScreen navigates straight to ControlScreen and kicks off connects in parallel. The remembered set is saved each time the user taps Connect (N). Disconnect-all returns to ScanScreen without re-auto-navigating until the next cold start.
 - ⏳ **Edge-case screens**: Bluetooth-off, all devices out of range, mid-session drops — currently undefined behaviour.
 - ✅ **Custom logo wired into icon and splash** — pixel-art zombie + dumbbell on cream `#F4ECD4`, adaptive on Android (cream background + transparent foreground PNG with launcher-applied 16% safe-zone inset), full-bleed cream on iOS. Splash matches.
 
@@ -171,12 +171,11 @@ What's still needed to hit the MVP target:
 
 ### 1h. Remaining work to close out Phase 1 (in priority order)
 
-✅ Done across the multi-device-control and permissions-and-settings branches: `shared_preferences`; `state/weights.dart`; reactive `state/preferences.dart` (units); `devices/weight_group.dart`; `widgets/{weight_button,dumbbell_card}.dart`; `screens/{control,scan,permission,settings,about}_screen.dart`; multi-select on the scan screen; settings/about reachable via gear icon.
+✅ Done across the multi-device-control, permissions-and-settings, and remembered-devices branches: `shared_preferences`; `state/weights.dart`; reactive `state/preferences.dart` (units + remembered device IDs); `devices/weight_group.dart`; `widgets/{weight_button,dumbbell_card,failed_device_card}.dart`; `screens/{control,scan,permission,settings,about}_screen.dart`; multi-select on the scan screen; settings/about reachable via gear icon; warm-start auto-reconnect to remembered dumbbells.
 
 Still pending:
 
-1. **Remembered-device fast path** — extend `state/preferences.dart` with last-connected MAC list; on `scan_screen.dart` cold start, pin remembered devices at the top and kick off auto-reconnect in parallel. (In flight on `phase1/remembered-devices`.)
-2. **Edge-case screens** — Bluetooth disabled, permission denied (mid-session revoke), all devices out of range. Currently undefined behaviour.
+1. **Edge-case screens** — Bluetooth disabled, permission denied (mid-session revoke), all devices out of range. Currently undefined behaviour.
 
 ### 1i. Out of scope for MVP (deferred)
 
@@ -276,6 +275,9 @@ The unit + widget test suites cover the pure-Dart and Flutter-widget layers, but
 - Switching to kg in Settings re-labels every button across both visible screens **without** a navigation round-trip (validates the reactive `Preferences.unit` listener).
 - About screen renders with credits, license, disclaimer, and the `docs/ble_protocol.md` reference visible without scrolling jankiness.
 - Killing and reopening the app: scan finds the same device and a fresh connect-then-set-weight round-trip works.
+- **Warm-start auto-reconnect**: after a successful Connect (N), kill the app and relaunch. The scan screen should not be visible — the app should land directly on the control screen, with the previously-connected dumbbell(s) reconnecting in parallel.
+- On the warm-start path, if a remembered dumbbell is out of range / offline, the FailedDeviceCard should appear with a retry button (validates the same fallback as the cold-start connect-failure flow).
+- Disconnect-all from the control screen → lands on the scan screen → kill and relaunch → app auto-navigates to control screen again (Disconnect-all does NOT forget remembered devices, only the next Connect (N) does).
 - Battery percentage on each card matches what nRF Connect shows for the same device.
 - Bluetooth turned off mid-session: cards grey out / re-enable: cards recover. (This is partially tracked under §1h "edge-case screens" but a pre-shipping spot-check is worth doing.)
 
