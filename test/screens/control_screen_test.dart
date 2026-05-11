@@ -9,6 +9,7 @@ import 'package:zombiejox/devices/weight_group.dart';
 import 'package:zombiejox/protocol/dumbbell_state.dart';
 import 'package:zombiejox/screens/control_screen.dart';
 import 'package:zombiejox/state/preferences.dart';
+import 'package:zombiejox/state/weights.dart';
 import 'package:zombiejox/widgets/failed_device_card.dart';
 
 /// Connects-instantly fake; lets the test push state values for assertions.
@@ -449,5 +450,239 @@ void main() {
     expect(find.text('3.6 kg'), findsOneWidget);
     expect(find.text('22.7 kg'), findsOneWidget);
     expect(find.text('8 lbs'), findsNothing);
+  });
+
+  // Auto-match-from-dock: when all connected dumbbells agree on a unit
+  // and the user hasn't picked one yet, ControlScreen nudges the app's
+  // display unit to match (with a SnackBar). Debounces 1.5s after the
+  // first ready to give slow-to-connect mates a chance to vote.
+
+  group('auto-match dock unit', () {
+    Future<Preferences> prefs(
+        {String unit = 'lbs', bool explicit = false}) async {
+      SharedPreferences.setMockInitialValues({
+        'units': unit,
+        'unit_explicitly_chosen': explicit,
+      });
+      return Preferences.load();
+    }
+
+    DumbbellState stateWithUnit({required int unitRaw, int weightIndex = 0}) =>
+        DumbbellState(
+          weightIndex: weightIndex,
+          motorActive: false,
+          batteryPct: 80,
+          unitRaw: unitRaw,
+        );
+
+    testWidgets(
+        'all members agree on kg + user has not chosen → app set to kg, '
+        'SnackBar shown', (tester) async {
+      final p = await prefs(unit: 'lbs');
+      final fakes = <_FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = _FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+
+      await tester.pumpWidget(MaterialApp(
+        home: ControlScreen(
+          devices: [_device('AA:01'), _device('AA:02')],
+          preferences: p,
+          createWeightGroup: () => group,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      for (final f in fakes) {
+        f.emitState(stateWithUnit(unitRaw: 0x01));
+      }
+      // Both ready ⇒ "all accounted for" fires the decision immediately,
+      // no debounce wait needed.
+      await tester.pumpAndSettle();
+
+      expect(p.getUnit(), WeightUnit.kg);
+      expect(p.unitExplicitlyChosen, isFalse,
+          reason: 'auto-match must not flip the explicit-choice flag');
+      expect(find.byType(SnackBar), findsOneWidget);
+      expect(find.textContaining('Set to kg'), findsOneWidget);
+    });
+
+    testWidgets('app already at the auto-matched unit → no SnackBar',
+        (tester) async {
+      final p = await prefs(unit: 'kg');
+      final fakes = <_FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = _FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+
+      await tester.pumpWidget(MaterialApp(
+        home: ControlScreen(
+          devices: [_device('AA:01')],
+          preferences: p,
+          createWeightGroup: () => group,
+        ),
+      ));
+      await tester.pumpAndSettle();
+      fakes.single.emitState(stateWithUnit(unitRaw: 0x01));
+      await tester.pumpAndSettle();
+
+      expect(p.getUnit(), WeightUnit.kg);
+      expect(find.byType(SnackBar), findsNothing,
+          reason: 'value already matched ⇒ nothing to announce');
+    });
+
+    testWidgets(
+        'members disagree → no preference change, "different units" SnackBar',
+        (tester) async {
+      final p = await prefs(unit: 'lbs');
+      final fakes = <_FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = _FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+
+      await tester.pumpWidget(MaterialApp(
+        home: ControlScreen(
+          devices: [_device('AA:01'), _device('AA:02')],
+          preferences: p,
+          createWeightGroup: () => group,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      fakes[0].emitState(stateWithUnit(unitRaw: 0x00)); // lbs
+      fakes[1].emitState(stateWithUnit(unitRaw: 0x01)); // kg
+      await tester.pumpAndSettle();
+
+      expect(p.getUnit(), WeightUnit.lbs,
+          reason: 'disagreement must not change the unit');
+      expect(find.textContaining('different units'), findsOneWidget);
+    });
+
+    testWidgets(
+        'user has explicitly chosen → auto-match is a no-op (no SnackBar, '
+        'no preference change)', (tester) async {
+      final p = await prefs(unit: 'lbs', explicit: true);
+      final fakes = <_FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = _FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+
+      await tester.pumpWidget(MaterialApp(
+        home: ControlScreen(
+          devices: [_device('AA:01')],
+          preferences: p,
+          createWeightGroup: () => group,
+        ),
+      ));
+      await tester.pumpAndSettle();
+      fakes.single.emitState(stateWithUnit(unitRaw: 0x01));
+      await tester.pumpAndSettle();
+
+      expect(p.getUnit(), WeightUnit.lbs);
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets(
+        'debounce: a slow second member that disagrees still wins — '
+        'the first ready does not get to decide alone within 1.5s',
+        (tester) async {
+      final p = await prefs(unit: 'lbs');
+      final fakes = <_FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = _FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+
+      await tester.pumpWidget(MaterialApp(
+        home: ControlScreen(
+          devices: [_device('AA:01'), _device('AA:02')],
+          preferences: p,
+          createWeightGroup: () => group,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      // Only the first fake is ready so far. Pump just under the
+      // debounce window so the timer hasn't fired yet.
+      fakes[0].emitState(stateWithUnit(unitRaw: 0x01));
+      await tester.pump(const Duration(milliseconds: 1000));
+      expect(p.getUnit(), WeightUnit.lbs,
+          reason: 'still within debounce, no decision yet');
+
+      // The second member finally arrives with a disagreeing value.
+      // "All accounted for" fires the decision immediately.
+      fakes[1].emitState(stateWithUnit(unitRaw: 0x00));
+      await tester.pumpAndSettle();
+
+      expect(p.getUnit(), WeightUnit.lbs, reason: 'disagreement ⇒ no change');
+      expect(find.textContaining('different units'), findsOneWidget);
+    });
+
+    testWidgets(
+        'one member ready + one member failed = "accounted for" → '
+        'decide on the lone vote without waiting the full debounce',
+        (tester) async {
+      final p = await prefs(unit: 'lbs');
+      final fakes = <_FakeDumbbell>[];
+      // First device succeeds; second fails to connect.
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = _FakeDumbbell(d);
+        if (fakes.isNotEmpty) f.failConnect = true;
+        fakes.add(f);
+        return f;
+      });
+
+      await tester.pumpWidget(MaterialApp(
+        home: ControlScreen(
+          devices: [_device('AA:01'), _device('AA:02')],
+          preferences: p,
+          createWeightGroup: () => group,
+        ),
+      ));
+      await tester.pumpAndSettle();
+      // Only the first one becomes ready.
+      fakes[0].emitState(stateWithUnit(unitRaw: 0x01));
+      await tester.pumpAndSettle();
+
+      // 1 ready + 1 failed = 2 attempted: "all accounted for". Decision
+      // fires immediately without consuming the full 1.5s debounce.
+      expect(p.getUnit(), WeightUnit.kg);
+      expect(find.textContaining('Set to kg'), findsOneWidget);
+    });
+
+    testWidgets('unknown unit byte → no decision (do not guess at the mapping)',
+        (tester) async {
+      final p = await prefs(unit: 'lbs');
+      final fakes = <_FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = _FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+
+      await tester.pumpWidget(MaterialApp(
+        home: ControlScreen(
+          devices: [_device('AA:01')],
+          preferences: p,
+          createWeightGroup: () => group,
+        ),
+      ));
+      await tester.pumpAndSettle();
+      // 0x42 isn't a known unit byte — silently leave the app unit alone.
+      fakes.single.emitState(stateWithUnit(unitRaw: 0x42));
+      await tester.pumpAndSettle();
+
+      expect(p.getUnit(), WeightUnit.lbs);
+      expect(find.byType(SnackBar), findsNothing);
+    });
   });
 }

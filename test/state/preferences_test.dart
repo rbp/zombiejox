@@ -108,4 +108,69 @@ void main() {
       expect(prefs.rememberedDeviceIds, ['BB:01']);
     });
   });
+
+  group('unitExplicitlyChosen', () {
+    test('defaults to false on a fresh install', () async {
+      final prefs = await Preferences.load();
+      expect(prefs.unitExplicitlyChosen, isFalse);
+    });
+
+    test('setUnit flips the flag to true and it persists across loads',
+        () async {
+      {
+        final prefs = await Preferences.load();
+        await prefs.setUnit(WeightUnit.kg);
+        expect(prefs.unitExplicitlyChosen, isTrue);
+      }
+      {
+        final prefs = await Preferences.load();
+        expect(prefs.unitExplicitlyChosen, isTrue);
+      }
+    });
+
+    test('setUnit flips the flag even when called with the current value',
+        () async {
+      // A user opening Settings, looking at the toggle, and tapping the
+      // already-selected option still counts as an explicit choice.
+      final prefs = await Preferences.load();
+      final current = prefs.getUnit();
+      await prefs.setUnit(current);
+      expect(prefs.unitExplicitlyChosen, isTrue);
+    });
+
+    test(
+        'setUnitIfNotExplicit changes the value and returns true when '
+        'the flag is false', () async {
+      final prefs = await Preferences.load();
+      final initial = prefs.getUnit();
+      final other = initial == WeightUnit.lbs ? WeightUnit.kg : WeightUnit.lbs;
+
+      final changed = await prefs.setUnitIfNotExplicit(other);
+      expect(changed, isTrue);
+      expect(prefs.getUnit(), other);
+      // Auto-matching does NOT mark the unit as explicitly chosen — a
+      // later auto-match (or the user opening Settings) is still allowed
+      // to fire.
+      expect(prefs.unitExplicitlyChosen, isFalse);
+    });
+
+    test('setUnitIfNotExplicit returns false when the value already matches',
+        () async {
+      final prefs = await Preferences.load();
+      final current = prefs.getUnit();
+      final changed = await prefs.setUnitIfNotExplicit(current);
+      expect(changed, isFalse);
+    });
+
+    test('setUnitIfNotExplicit is a no-op once the user has chosen', () async {
+      final prefs = await Preferences.load();
+      await prefs.setUnit(WeightUnit.lbs);
+      expect(prefs.unitExplicitlyChosen, isTrue);
+
+      final changed = await prefs.setUnitIfNotExplicit(WeightUnit.kg);
+      expect(changed, isFalse);
+      expect(prefs.getUnit(), WeightUnit.lbs,
+          reason: 'explicit choice must not be overridden by auto-match');
+    });
+  });
 }

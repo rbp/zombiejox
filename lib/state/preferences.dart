@@ -20,6 +20,7 @@ class Preferences {
   final ValueNotifier<WeightUnit> _unit;
 
   static const _keyUnit = 'units';
+  static const _keyUnitExplicit = 'unit_explicitly_chosen';
   static const _keyRememberedDeviceIds = 'remembered_device_ids';
 
   static Future<Preferences> load() async {
@@ -35,10 +36,33 @@ class Preferences {
   /// Current value (synchronous read). Equivalent to `unit.value`.
   WeightUnit getUnit() => _unit.value;
 
+  /// Whether the user has *explicitly* picked a unit via the Settings
+  /// toggle (vs. the value still being the locale-derived default or an
+  /// auto-match from the dock). Once true, the auto-match-from-dock UX in
+  /// [ControlScreen] becomes a no-op. Persists across launches.
+  bool get unitExplicitlyChosen => _prefs.getBool(_keyUnitExplicit) ?? false;
+
+  /// User-facing setter — flips [unitExplicitlyChosen] to true regardless
+  /// of whether the value actually changed (the user tapped the toggle;
+  /// even a re-tap of the current value counts as an explicit choice).
   Future<void> setUnit(WeightUnit unit) async {
+    await _prefs.setBool(_keyUnitExplicit, true);
     if (_unit.value == unit) return;
     _unit.value = unit;
     await _prefs.setString(_keyUnit, unit.name);
+  }
+
+  /// Auto-match setter — used by ControlScreen when all connected
+  /// dumbbells agree on a unit and the user hasn't picked one yet. No-op
+  /// if [unitExplicitlyChosen] is already true, or if the current value
+  /// already matches. Returns true iff the persisted value actually
+  /// changed (lets the caller decide whether to surface a SnackBar).
+  Future<bool> setUnitIfNotExplicit(WeightUnit unit) async {
+    if (unitExplicitlyChosen) return false;
+    if (_unit.value == unit) return false;
+    _unit.value = unit;
+    await _prefs.setString(_keyUnit, unit.name);
+    return true;
   }
 
   /// Remote IDs of the dumbbells from the user's most recent *verified*
