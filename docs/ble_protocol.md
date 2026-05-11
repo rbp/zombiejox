@@ -2,7 +2,7 @@
 
 Reverse-engineered from decompiled `com.jaxjox.mobile` v3.1.0 APK. All paths below are relative to `reverse-engineering/decompiled/sources/`.
 
-> **Status**: Set-weight + status query + time-sync + username are all validated end-to-end against a real DumbbellConnect (`DB200-0161997`, hardware V1.0, firmware V1.0, software V1.1.4db). Setting a weight from the app side physically moves the dumbbell. Open items: exact meaning of `0xD1` byte 5 (Java field name `battery` but doesn't match the user-facing % — see below), the integer-value mapping for `0xD1` byte 8 (unit; `0`/`1` ↔ lbs/kg unknown, needs on-device probe), `0xD2` 24-bit fields (likely reps/volume/power, untested without a workout), history sync (opcodes `0xD3`/`0xD4`). **There is no app-to-dock kg/lbs push opcode** — the decompiled code shows the app's unit toggle is purely a display preference, not a BLE write.
+> **Status**: Set-weight + status query + time-sync + username are all validated end-to-end against a real DumbbellConnect (`DB200-0161997`, hardware V1.0, firmware V1.0, software V1.1.4db). Setting a weight from the app side physically moves the dumbbell. The `0xD1` byte-8 unit byte is decoded and on-device-confirmed (`0x00` = lbs, `0x01` = kg). Open items: exact meaning of `0xD1` byte 5 (Java field name `battery` but doesn't match the user-facing % — see below), `0xD2` 24-bit fields (likely reps/volume/power, untested without a workout), history sync (opcodes `0xD3`/`0xD4`). **There is no app-to-dock kg/lbs push opcode** — the decompiled code shows the app's unit toggle is purely a display preference, not a BLE write; the user changes the dock's unit via a hidden gesture on the dock itself.
 
 ---
 
@@ -166,7 +166,7 @@ The same opcode is used for two different things — explicit replies to `0xD1` 
 | 5 | `battery` (per APK name) | But the value we've seen here (`0x43` in query reply, `0x64` in motor pushes) doesn't match the user-facing %, and may be something else entirely (firmware version? a different cell?). Treat as unknown until on-device verified. |
 | 6 | **`flag`** — motion state | `0x0C` = motor active / motion starting; `0x04` = motor idle / settled. Other values seen in query response (`0x07`); we treat anything ≠ `0x0C` as idle. |
 | 7 | `subBattery` (per APK name) — but it's the **user-facing battery %** | `0x64` = 100%, matches the Battery Service (`0x2A19`) value. The APK's two-battery naming might be from a different device class — for DumbbellConnect, this is the one to render. |
-| 8 | **`unit`** — dock display unit | Single byte. **`0x01` = kg** (confirmed on `DB200-0161997` set to kg via the dock's hidden kg/lbs gesture). **`0x00` = lbs** (inferred — all earlier capture sessions had this dumbbell on lbs and consistently saw byte 8 = `0x00`; needs one explicit on-device verification to make ironclad). The decompiled Java forwards this byte through `ChangedManager.c` to a logger and never compares it to a constant, which is why the mapping had to be recovered on-device. |
+| 8 | **`unit`** — dock display unit | Single byte. **`0x00` = lbs** and **`0x01` = kg**, both confirmed on-device by flipping the dock's hidden kg/lbs gesture between connects. The decompiled Java forwards this byte through `ChangedManager.c` to a logger and never compares it to a constant, which is why the mapping had to be recovered on-device. |
 
 ### Observed examples
 
