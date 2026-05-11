@@ -43,8 +43,7 @@ class ControlScreen extends StatefulWidget {
 }
 
 class _ControlScreenState extends State<ControlScreen> {
-  late final WeightGroup _group =
-      widget.createWeightGroup?.call() ?? WeightGroup();
+  late final WeightGroup _group = widget.createWeightGroup?.call() ?? WeightGroup();
   // Devices whose most recent connect attempt threw. Each entry persists
   // until the user taps refresh and the connect either succeeds (entry
   // removed when the device joins the group) or fails again (entry
@@ -80,9 +79,7 @@ class _ControlScreenState extends State<ControlScreen> {
   void _onMembership(List<Dumbbell> current) {
     final asSet = current.toSet();
     // Drop subscriptions for removed members.
-    final removed = _stateSubs.keys
-        .where((d) => !asSet.contains(d))
-        .toList(growable: false);
+    final removed = _stateSubs.keys.where((d) => !asSet.contains(d)).toList(growable: false);
     for (final d in removed) {
       _stateSubs.remove(d)?.cancel();
     }
@@ -132,8 +129,7 @@ class _ControlScreenState extends State<ControlScreen> {
     }
     final ready = _group.dumbbells.where((d) => d.isReady).toList();
     if (ready.isEmpty) return;
-    final allAccountedFor =
-        ready.length + _failedDevices.length >= widget.devices.length;
+    final allAccountedFor = ready.length + _failedDevices.length >= widget.devices.length;
     _autoMatchTimer?.cancel();
     if (allAccountedFor) {
       unawaited(_decideAutoMatch());
@@ -172,15 +168,14 @@ class _ControlScreenState extends State<ControlScreen> {
         if (changed) {
           final label = u == WeightUnit.lbs ? 'lbs' : 'kg';
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Set to $label to match your dumbbells.')),
+            SnackBar(content: Text('Unit set to $label to match your dumbbells.')),
           );
         }
       } else if (units.length > 1) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-                'Your dumbbells are set to different units — pick one in Settings.'),
+            content: Text('Dumbbells are set to different units — pick one in Settings'),
           ),
         );
       }
@@ -397,8 +392,7 @@ class _Body extends StatelessWidget {
       for (final device in orderedDevices)
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 250),
-          transitionBuilder: (child, anim) =>
-              FadeTransition(opacity: anim, child: child),
+          transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
           child: _cardFor(device, dumbbellByDevice),
         ),
     ];
