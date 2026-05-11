@@ -166,7 +166,7 @@ The same opcode is used for two different things — explicit replies to `0xD1` 
 | 5 | `battery` (per APK name) | But the value we've seen here (`0x43` in query reply, `0x64` in motor pushes) doesn't match the user-facing %, and may be something else entirely (firmware version? a different cell?). Treat as unknown until on-device verified. |
 | 6 | **`flag`** — motion state | `0x0C` = motor active / motion starting; `0x04` = motor idle / settled. Other values seen in query response (`0x07`); we treat anything ≠ `0x0C` as idle. |
 | 7 | `subBattery` (per APK name) — but it's the **user-facing battery %** | `0x64` = 100%, matches the Battery Service (`0x2A19`) value. The APK's two-battery naming might be from a different device class — for DumbbellConnect, this is the one to render. |
-| 8 | **`unit`** — dock display unit | Single byte (`0` or `1`). The decompiled Java forwards this through `ChangedManager.c` to a logger and never compares it to a constant, so the value→unit mapping isn't in the APK. We log the byte on every `0xD1` we receive (see `Dumbbell._onBytes`) so it can be confirmed on-device by flipping the physical kg/lbs button between connects. |
+| 8 | **`unit`** — dock display unit | Single byte. **`0x01` = kg** (confirmed on `DB200-0161997` set to kg via the dock's hidden kg/lbs gesture). **`0x00` = lbs** (inferred — all earlier capture sessions had this dumbbell on lbs and consistently saw byte 8 = `0x00`; needs one explicit on-device verification to make ironclad). The decompiled Java forwards this byte through `ChangedManager.c` to a logger and never compares it to a constant, which is why the mapping had to be recovered on-device. |
 
 ### Observed examples
 
