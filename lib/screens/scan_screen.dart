@@ -107,7 +107,7 @@ class _ScanScreenState extends State<ScanScreen> {
         await FlutterBluePlus.stopScan();
       }
       await FlutterBluePlus.startScan(
-        withKeywords: kJaxJoxNamePrefixes.values.toList(),
+        withKeywords: kJaxJoxNamePrefixes,
         timeout: const Duration(seconds: 30),
       );
     } catch (e, st) {
@@ -193,7 +193,7 @@ class _ScanScreenState extends State<ScanScreen> {
   bool _isJaxJox(String name) {
     if (name.isEmpty) return false;
     if (name.endsWith('U')) return false; // DFU mode
-    return kJaxJoxNamePrefixes.values.any(name.startsWith);
+    return kJaxJoxNamePrefixes.any(name.startsWith);
   }
 
   @override

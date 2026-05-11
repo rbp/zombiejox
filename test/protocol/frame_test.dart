@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zombiejox/protocol/dumbbell_state.dart';
 import 'package:zombiejox/protocol/frame.dart';
 import 'package:zombiejox/protocol/opcodes.dart';
+import 'package:zombiejox/state/weights.dart';
 
 void main() {
   group('buildFrame', () {
@@ -57,7 +58,7 @@ void main() {
       final s = applyFrame(null, frame!);
       expect(s, isNotNull);
       expect(s!.weightIndex, 3);
-      expect(s.weightLbs, 26);
+      expect(kWeightLbsByIndex[s.weightIndex], 26);
       expect(s.motorActive, false);
       expect(s.batteryPct, 100);
     });
@@ -120,7 +121,7 @@ void main() {
       ]);
       final s = applyFrame(null, frame!);
       expect(s!.weightIndex, 1);
-      expect(s.weightLbs, 14);
+      expect(kWeightLbsByIndex[s.weightIndex], 14);
     });
   });
 }

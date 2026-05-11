@@ -1,4 +1,4 @@
-import '../state/weights.dart';
+import '../state/weights.dart' show kJaxJoxWeightCount;
 import 'frame.dart';
 import 'opcodes.dart';
 
@@ -30,10 +30,6 @@ class DumbbellState {
     this.unitRaw,
   });
 
-  /// Convenience: current weight in pounds. Use [formatWeight] from
-  /// `state/weights.dart` if you need a unit-aware display string.
-  int get weightLbs => kWeightLbsByIndex[weightIndex];
-
   DumbbellState copyWith({
     int? weightIndex,
     bool? motorActive,
@@ -46,6 +42,19 @@ class DumbbellState {
         batteryPct: batteryPct ?? this.batteryPct,
         unitRaw: unitRaw ?? this.unitRaw,
       );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DumbbellState &&
+          other.weightIndex == weightIndex &&
+          other.motorActive == motorActive &&
+          other.batteryPct == batteryPct &&
+          other.unitRaw == unitRaw;
+
+  @override
+  int get hashCode =>
+      Object.hash(weightIndex, motorActive, batteryPct, unitRaw);
 }
 
 /// Apply a parsed RX frame to the running state. Returns null if the frame is
@@ -56,15 +65,13 @@ DumbbellState? applyFrame(DumbbellState? prev, ParsedFrame frame) {
       if (frame.payload.length < 6) return prev;
       final idx = frame.payload[1];
       if (idx < 0 || idx >= kJaxJoxWeightCount) return prev;
-      final motion = frame.payload[3];
-      final battery = frame.payload[4];
       // Payload offset 5 = frame byte 8 = unit. See [DumbbellState.unitRaw].
-      final unitRaw = frame.payload[5];
-      return DumbbellState(
+      return (prev ?? const DumbbellState(weightIndex: 0, motorActive: false))
+          .copyWith(
         weightIndex: idx,
-        motorActive: motion == _motorActive,
-        batteryPct: battery,
-        unitRaw: unitRaw,
+        motorActive: frame.payload[3] == _motorActive,
+        batteryPct: frame.payload[4],
+        unitRaw: frame.payload[5],
       );
     case Opcodes.stateBroadcast: // 0xD2 — periodic ~1 Hz
       if (frame.payload.length < 9) return prev;
