@@ -69,6 +69,36 @@ void main() {
       expect(s!.motorActive, true);
     });
 
+    test('0xD1 reply carries the raw unit byte from offset 8', () {
+      // FF 0A D1 00 03 64 04 64 00 6D — the docs §5 motor-settle push,
+      // unit byte at offset 8 is 0x00. The decompiled APK never assigns
+      // a meaning to this byte, so we surface it as a raw int and let
+      // the UI / on-device probe map it to lbs/kg.
+      final frame = parseFrame(
+          [0xFF, 0x0A, 0xD1, 0x00, 0x03, 0x64, 0x04, 0x64, 0x00, 0x6D]);
+      final s = applyFrame(null, frame!);
+      expect(s!.unitRaw, 0x00);
+    });
+
+    test('0xD2 broadcasts do not carry a unit byte — preserve the prior one',
+        () {
+      // 0xD2's byte layout (per ChangedManager.U0 log) has no unit field;
+      // applying a 0xD2 to a state that already has unitRaw should leave
+      // unitRaw alone.
+      final d1 = parseFrame(
+          [0xFF, 0x0A, 0xD1, 0x00, 0x03, 0x64, 0x04, 0x64, 0x01, 0x6C]);
+      final afterD1 = applyFrame(null, d1!)!;
+      expect(afterD1.unitRaw, 0x01);
+
+      final d2 = parseFrame([
+        0xFF, 0x10, 0xD2, 0x00, 0x00, 0x00, 0x00, 0x00, //
+        0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x20
+      ]);
+      final afterD2 = applyFrame(afterD1, d2!)!;
+      expect(afterD2.weightIndex, 5);
+      expect(afterD2.unitRaw, 0x01, reason: 'unitRaw must survive a 0xD2');
+    });
+
     test('0xD2 broadcast updates weight index (docs §5)', () {
       final frame = parseFrame([
         0xFF,

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import '../ble/ble_service.dart';
@@ -98,10 +99,25 @@ class Dumbbell {
     if (_disposed) return;
     final frame = parseFrame(bytes);
     if (frame == null) return;
+    final prevUnit = _last?.unitRaw;
     final next = applyFrame(_last, frame);
     if (next != null && !_states.isClosed) {
       _last = next;
       _states.add(next);
+      // One-shot probe: surface the dock's "unit" byte the first time we
+      // see it for this device, and again whenever it changes. The
+      // mapping (which value == lbs vs kg) isn't in the original APK —
+      // the Java code receives the byte but never compares it to a
+      // constant — so on-device observation is the only way to nail it
+      // down. Flip the physical kg/lbs button on the dock and watch the
+      // log to confirm.
+      if (next.unitRaw != null && next.unitRaw != prevUnit) {
+        debugPrint(
+          '[dumbbell ${device.remoteId.str}] '
+          '0xD1 unit byte = 0x${next.unitRaw!.toRadixString(16).padLeft(2, '0')} '
+          '(${next.unitRaw})',
+        );
+      }
     }
   }
 }

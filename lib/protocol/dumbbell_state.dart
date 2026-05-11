@@ -12,22 +12,38 @@ class DumbbellState {
   final bool motorActive;
   final int? batteryPct;
 
+  /// Raw "unit" byte from the `0xD1` reply (frame byte 8). The original
+  /// JaxJox app receives this value but never compares it to any
+  /// constant — `ChangedManager` just forwards it through a logger — so
+  /// the `0 = lbs / 1 = kg` (or reverse) mapping isn't recoverable from
+  /// the decompiled code and needs on-device confirmation. Once the
+  /// mapping is known, ControlScreen can auto-match the app's display
+  /// unit to the dock's. Null on states that didn't come from a `0xD1`
+  /// frame — `0xD2` periodic broadcasts don't carry the unit byte.
+  final int? unitRaw;
+
   const DumbbellState({
     required this.weightIndex,
     required this.motorActive,
     this.batteryPct,
+    this.unitRaw,
   });
 
   /// Convenience: current weight in pounds. Use [formatWeight] from
   /// `state/weights.dart` if you need a unit-aware display string.
   int get weightLbs => kWeightLbsByIndex[weightIndex];
 
-  DumbbellState copyWith(
-          {int? weightIndex, bool? motorActive, int? batteryPct}) =>
+  DumbbellState copyWith({
+    int? weightIndex,
+    bool? motorActive,
+    int? batteryPct,
+    int? unitRaw,
+  }) =>
       DumbbellState(
         weightIndex: weightIndex ?? this.weightIndex,
         motorActive: motorActive ?? this.motorActive,
         batteryPct: batteryPct ?? this.batteryPct,
+        unitRaw: unitRaw ?? this.unitRaw,
       );
 }
 
@@ -41,10 +57,13 @@ DumbbellState? applyFrame(DumbbellState? prev, ParsedFrame frame) {
       if (idx < 0 || idx >= kJaxJoxWeightCount) return prev;
       final motion = frame.payload[3];
       final battery = frame.payload[4];
+      // Payload offset 5 = frame byte 8 = unit. See [DumbbellState.unitRaw].
+      final unitRaw = frame.payload[5];
       return DumbbellState(
         weightIndex: idx,
         motorActive: motion == _motorActive,
         batteryPct: battery,
+        unitRaw: unitRaw,
       );
     case Opcodes.stateBroadcast: // 0xD2 — periodic ~1 Hz
       if (frame.payload.length < 9) return prev;
