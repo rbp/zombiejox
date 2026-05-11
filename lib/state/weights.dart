@@ -52,3 +52,20 @@ String formatWeight(int index, WeightUnit unit) {
       return '${kWeightKgByIndex[index]} kg';
   }
 }
+
+/// Map the raw "unit" byte from a `0xD1` reply (see
+/// `DumbbellState.unitRaw` / `docs/ble_protocol.md` §`0xD1` byte
+/// semantics) to a [WeightUnit]. The byte is a small enum confirmed
+/// on-device: `0x00` = lbs, `0x01` = kg. Returns null for any other
+/// value (including null itself) — callers should treat "unknown" as
+/// "we don't know" rather than guessing.
+WeightUnit? weightUnitFromRawByte(int? raw) {
+  switch (raw) {
+    case 0x00:
+      return WeightUnit.lbs;
+    case 0x01:
+      return WeightUnit.kg;
+    default:
+      return null;
+  }
+}

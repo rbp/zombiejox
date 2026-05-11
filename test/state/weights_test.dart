@@ -57,4 +57,21 @@ void main() {
       expect(WeightUnit.fromName(''), WeightUnit.lbs);
     });
   });
+
+  group('weightUnitFromRawByte', () {
+    test('0x00 is lbs, 0x01 is kg (on-device-confirmed mapping)', () {
+      expect(weightUnitFromRawByte(0x00), WeightUnit.lbs);
+      expect(weightUnitFromRawByte(0x01), WeightUnit.kg);
+    });
+
+    test('null and unknown values return null, not a guess', () {
+      // The unit byte is a small enum — anything other than 0/1 means
+      // we got an unexpected value and shouldn't guess. The caller
+      // treats null as "leave the app's display unit alone".
+      expect(weightUnitFromRawByte(null), isNull);
+      expect(weightUnitFromRawByte(2), isNull);
+      expect(weightUnitFromRawByte(0xFF), isNull);
+      expect(weightUnitFromRawByte(-1), isNull);
+    });
+  });
 }

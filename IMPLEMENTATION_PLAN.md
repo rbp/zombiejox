@@ -43,9 +43,11 @@ The BLE protocol is undocumented. One third-party developer (Eamon Tuhami / X8IQ
 ### 0e. Document the protocol — ✅ done
 - `docs/ble_protocol.md` is the live spec: UUIDs, frame format, opcodes, checksum, connection sequence, known unknowns.
 
-### 0f. (Optional) HCI snoop for residual unknowns — ⏳ deferred
-- Capture only needed if we want to nail down: kg/lbs unit toggle opcode, status response (0xD1) byte semantics, set-weight ack (0xD2) byte semantics. None block MVP.
-- On Android: Developer Options → "Enable Bluetooth HCI snoop log", use the original app, then `adb bugreport bugreport.zip` and open `FS/data/misc/bluetooth/logs/btsnoop_hci.log` in Wireshark with filter `btatt`.
+### 0f. (Optional) HCI snoop for residual unknowns — ✅ mostly closed via static analysis
+- **kg/lbs unit toggle**: no opcode exists for the dumbbell. The decompiled `EditUnitMeasureFragment` / `UserManager.setWeightUnit` write to a SharedPreferences key only; `FitnessManager` (the BLE-write class) has zero unit references. The dock has its own physical kg/lbs button; the app reads the current dock unit from `0xD1` byte 8 but never writes one. (The smart scale `SmartScaleManager.onSyncUnit` is a different device class.)
+- **`0xD1` byte semantics**: fully recovered from `DumbBellReceivedDataCallback.h1(...)` + `DeviceStatus` field names (see `docs/ble_protocol.md` §`0xD1` byte semantics). Two bytes still need on-device confirmation: the `0/1` ↔ kg/lbs mapping for the unit byte at offset 8 (probe wired in `Dumbbell._onBytes` — see logging), and what byte 5 (`battery` per the APK, but values don't match the user-facing %) actually represents.
+- **`0xD2` 24-bit fields**: per `ChangedManager.U0` log line, bytes 4–6 = time, byte 7 = flag, bytes 8–10 = count, byte 11 = weight index, bytes 12–13 = unknown. Workout-specific; not relevant for MVP.
+- HCI snoop of the original app is blocked anyway — JaxJox cloud is gone, the app can't get past its login wall.
 
 ---
 
