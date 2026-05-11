@@ -43,7 +43,8 @@ class ControlScreen extends StatefulWidget {
 }
 
 class _ControlScreenState extends State<ControlScreen> {
-  late final WeightGroup _group = widget.createWeightGroup?.call() ?? WeightGroup();
+  late final WeightGroup _group =
+      widget.createWeightGroup?.call() ?? WeightGroup();
   // Devices whose most recent connect attempt threw. Each entry persists
   // until the user taps refresh and the connect either succeeds (entry
   // removed when the device joins the group) or fails again (entry
@@ -79,7 +80,9 @@ class _ControlScreenState extends State<ControlScreen> {
   void _onMembership(List<Dumbbell> current) {
     final asSet = current.toSet();
     // Drop subscriptions for removed members.
-    final removed = _stateSubs.keys.where((d) => !asSet.contains(d)).toList(growable: false);
+    final removed = _stateSubs.keys
+        .where((d) => !asSet.contains(d))
+        .toList(growable: false);
     for (final d in removed) {
       _stateSubs.remove(d)?.cancel();
     }
@@ -115,29 +118,43 @@ class _ControlScreenState extends State<ControlScreen> {
   /// say they're set to (via `0xD1` byte 8 → `DumbbellState.unitRaw` →
   /// [weightUnitFromRawByte]).
   ///
-  /// Bails immediately if (a) we've already decided this screen instance,
-  /// (b) the user has explicitly picked a unit in Settings, or (c) no
-  /// member is ready yet. Otherwise, if every attempted device is
-  /// accounted for (ready or failed) we fire the decision right away;
-  /// otherwise we debounce 1.5s of no-new-state so a slow-to-connect
-  /// mate can still vote.
+  /// Bails if (a) we've already decided this screen instance, (b) the
+  /// user has explicitly picked a unit in Settings, or (c) no group
+  /// member has a *known* unit byte yet. The "known unit" filter
+  /// matters — [Dumbbell.isReady] becomes true on the post-connect
+  /// battery read, *before* the `0xD1` reply with the unit byte arrives;
+  /// firing on bare `isReady` would race that window and decide with an
+  /// empty units snapshot, permanently disabling auto-match for the
+  /// screen.
+  ///
+  /// When at least one member has a known unit: if every attempted
+  /// device is now accounted for (known-unit or failed) we fire the
+  /// decision immediately; otherwise we arm a 1.5s debounce so a
+  /// slow-to-connect mate can still vote. The debounce is **armed
+  /// once** — subsequent state pushes don't reset it, because real
+  /// devices emit `0xD2` broadcasts ~1 Hz and an indefinitely-resetting
+  /// timer would never fire on its own.
   void _maybeArmAutoMatch() {
     if (_autoMatchDecided) return;
     if (widget.preferences.unitExplicitlyChosen) {
       _autoMatchDecided = true;
       return;
     }
-    final ready = _group.dumbbells.where((d) => d.isReady).toList();
-    if (ready.isEmpty) return;
-    final allAccountedFor = ready.length + _failedDevices.length >= widget.devices.length;
-    _autoMatchTimer?.cancel();
+    final withKnownUnit = _group.dumbbells.where((d) =>
+        d.isReady && weightUnitFromRawByte(d.lastState?.unitRaw) != null);
+    if (withKnownUnit.isEmpty) return;
+    final accounted = withKnownUnit.length + _failedDevices.length;
+    final allAccountedFor = accounted >= widget.devices.length;
     if (allAccountedFor) {
+      _autoMatchTimer?.cancel();
       unawaited(_decideAutoMatch());
-    } else {
-      _autoMatchTimer = Timer(_autoMatchDebounce, () {
-        unawaited(_decideAutoMatch());
-      });
+      return;
     }
+    // First arming only — see method docstring on why we don't reset.
+    if (_autoMatchTimer != null) return;
+    _autoMatchTimer = Timer(_autoMatchDebounce, () {
+      unawaited(_decideAutoMatch());
+    });
   }
 
   /// Snapshot the unit byte of every ready member, decide what to do.
@@ -151,8 +168,10 @@ class _ControlScreenState extends State<ControlScreen> {
   /// and a UX nicety isn't worth crashing the screen over.
   Future<void> _decideAutoMatch() async {
     if (_autoMatchDecided) return;
-    _autoMatchDecided = true;
-    if (widget.preferences.unitExplicitlyChosen) return;
+    if (widget.preferences.unitExplicitlyChosen) {
+      _autoMatchDecided = true;
+      return;
+    }
 
     try {
       final units = <WeightUnit>{};
@@ -161,6 +180,13 @@ class _ControlScreenState extends State<ControlScreen> {
         if (u != null) units.add(u);
       }
 
+      // Defensive: with the "known unit" filter in `_maybeArmAutoMatch`
+      // this shouldn't happen in practice, but if some race produces an
+      // empty snapshot here, *don't* mark the decision final — let a
+      // future state emission re-arm us when a known unit shows up.
+      if (units.isEmpty) return;
+      _autoMatchDecided = true;
+
       if (units.length == 1) {
         final u = units.single;
         final changed = await widget.preferences.setUnitIfNotExplicit(u);
@@ -168,19 +194,19 @@ class _ControlScreenState extends State<ControlScreen> {
         if (changed) {
           final label = u == WeightUnit.lbs ? 'lbs' : 'kg';
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Unit set to $label to match your dumbbells.')),
+            SnackBar(
+                content: Text('Unit set to $label to match your dumbbells.')),
           );
         }
-      } else if (units.length > 1) {
+      } else {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Dumbbells are set to different units — pick one in Settings'),
+            content: Text(
+                'Dumbbells are set to different units — pick one in Settings'),
           ),
         );
       }
-      // units.isEmpty: every ready member reported an unknown unit byte.
-      // Don't guess — leave the app's display unit at whatever it was.
     } catch (e, st) {
       // A SharedPreferences write failure or a build-context shenanigan
       // shouldn't tear the screen down. Decision is already marked
@@ -392,7 +418,8 @@ class _Body extends StatelessWidget {
       for (final device in orderedDevices)
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 250),
-          transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
+          transitionBuilder: (child, anim) =>
+              FadeTransition(opacity: anim, child: child),
           child: _cardFor(device, dumbbellByDevice),
         ),
     ];
