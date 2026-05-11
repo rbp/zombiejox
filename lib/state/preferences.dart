@@ -20,6 +20,7 @@ class Preferences {
   final ValueNotifier<WeightUnit> _unit;
 
   static const _keyUnit = 'units';
+  static const _keyRememberedDeviceIds = 'remembered_device_ids';
 
   static Future<Preferences> load() async {
     final p = await SharedPreferences.getInstance();
@@ -38,6 +39,23 @@ class Preferences {
     if (_unit.value == unit) return;
     _unit.value = unit;
     await _prefs.setString(_keyUnit, unit.name);
+  }
+
+  /// Remote IDs of the dumbbells from the user's most recent successful
+  /// "Connect (N)" tap on the scan screen. Used to skip the scan step on
+  /// warm start — see `ScanScreen._maybeAutoConnect`. Empty before the
+  /// first ever connect.
+  ///
+  /// We persist plain `remoteId.str` values rather than serialised
+  /// `BluetoothDevice`s because `flutter_blue_plus` can rehydrate a
+  /// device from just the id, and that's the only field that survives
+  /// across runs anyway.
+  List<String> get rememberedDeviceIds {
+    return _prefs.getStringList(_keyRememberedDeviceIds) ?? const [];
+  }
+
+  Future<void> setRememberedDeviceIds(List<String> ids) async {
+    await _prefs.setStringList(_keyRememberedDeviceIds, ids);
   }
 }
 

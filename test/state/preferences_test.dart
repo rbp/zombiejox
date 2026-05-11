@@ -68,4 +68,44 @@ void main() {
       expect(prefs.getUnit(), prefs.unit.value);
     });
   });
+
+  group('rememberedDeviceIds', () {
+    test('defaults to empty before any set', () async {
+      final prefs = await Preferences.load();
+      expect(prefs.rememberedDeviceIds, isEmpty);
+    });
+
+    test('setRememberedDeviceIds persists across loads', () async {
+      {
+        final prefs = await Preferences.load();
+        await prefs.setRememberedDeviceIds(['AA:01', 'AA:02']);
+        expect(prefs.rememberedDeviceIds, ['AA:01', 'AA:02']);
+      }
+      {
+        final prefs = await Preferences.load();
+        expect(prefs.rememberedDeviceIds, ['AA:01', 'AA:02']);
+      }
+    });
+
+    test('setRememberedDeviceIds([]) clears the list', () async {
+      final prefs = await Preferences.load();
+      await prefs.setRememberedDeviceIds(['AA:01']);
+      await prefs.setRememberedDeviceIds(const []);
+      expect(prefs.rememberedDeviceIds, isEmpty);
+    });
+
+    test('order is preserved (so the scan screen can pin them in tap order)',
+        () async {
+      final prefs = await Preferences.load();
+      await prefs.setRememberedDeviceIds(['AA:03', 'AA:01', 'AA:02']);
+      expect(prefs.rememberedDeviceIds, ['AA:03', 'AA:01', 'AA:02']);
+    });
+
+    test('setRememberedDeviceIds replaces, does not merge', () async {
+      final prefs = await Preferences.load();
+      await prefs.setRememberedDeviceIds(['AA:01', 'AA:02']);
+      await prefs.setRememberedDeviceIds(['BB:01']);
+      expect(prefs.rememberedDeviceIds, ['BB:01']);
+    });
+  });
 }

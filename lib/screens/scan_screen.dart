@@ -21,6 +21,10 @@ class ScanScreen extends StatefulWidget {
 
 class _ScanScreenState extends State<ScanScreen> {
   bool _checking = true;
+  // Sticky: once we've decided whether to auto-connect on cold start, we
+  // don't redo it when the user pops back from ControlScreen (e.g. via
+  // Disconnect-all). They probably want to pick different dumbbells.
+  bool _autoConnectAttempted = false;
   final Set<BluetoothDevice> _selected = <BluetoothDevice>{};
 
   @override
@@ -50,6 +54,22 @@ class _ScanScreenState extends State<ScanScreen> {
       );
       return;
     }
+
+    // Warm-start fast path: if we remember dumbbells from a previous run,
+    // navigate straight to ControlScreen and let it kick off connects in
+    // parallel. The scan UI stays "checking" underneath so the user
+    // doesn't see a flash of the empty scan list during the transition.
+    if (!_autoConnectAttempted) {
+      _autoConnectAttempted = true;
+      final ids = widget.preferences.rememberedDeviceIds;
+      if (ids.isNotEmpty) {
+        await _navigateToControl([
+          for (final id in ids) BluetoothDevice(remoteId: DeviceIdentifier(id)),
+        ]);
+        return;
+      }
+    }
+
     setState(() => _checking = false);
     _startScan();
   }
@@ -78,6 +98,17 @@ class _ScanScreenState extends State<ScanScreen> {
     if (_selected.isEmpty) return;
     final devices = _selected.toList();
     await FlutterBluePlus.stopScan();
+    await _navigateToControl(devices);
+  }
+
+  /// Saves the selection as the remembered set (so a warm restart skips
+  /// the scan step), pushes ControlScreen, and on return restarts scanning
+  /// for the next pick. Shared between the manual "Connect (N)" tap and
+  /// the auto-connect-on-cold-start path.
+  Future<void> _navigateToControl(List<BluetoothDevice> devices) async {
+    await widget.preferences.setRememberedDeviceIds(
+      [for (final d in devices) d.remoteId.str],
+    );
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -88,7 +119,12 @@ class _ScanScreenState extends State<ScanScreen> {
       ),
     );
     if (!mounted) return;
-    setState(_selected.clear);
+    // _checking may still be true if we entered via the auto-connect path —
+    // flip it now so the scan UI replaces the spinner.
+    setState(() {
+      _selected.clear();
+      _checking = false;
+    });
     _startScan();
   }
 
