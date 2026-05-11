@@ -38,7 +38,6 @@ The BLE protocol is undocumented. One third-party developer (Eamon Tuhami / X8IQ
 - Disassembled with Xcode's `llvm-objdump` (already on the machine — no Ghidra/Hopper needed).
 - Algorithm: `((-sum_of_bytes) ^ 0x3A) & 0xFF` over the pre-checksum frame.
 - Also disassembled `fetchPassCode` and `fetchBeat` — both belong to Chileaf HRM support, not the dumbbells. **No hidden auth on DumbbellConnect.**
-- HCI snoop log is still on the table for the kg/lbs toggle question (see 0f).
 
 ### 0e. Document the protocol — ✅ done
 - `docs/ble_protocol.md` is the live spec: UUIDs, frame format, opcodes, checksum, connection sequence, known unknowns.
