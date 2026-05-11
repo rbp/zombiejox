@@ -43,7 +43,8 @@ class Preferences {
 
   /// Remote IDs of the dumbbells from the user's most recent successful
   /// "Connect (N)" tap on the scan screen. Used to skip the scan step on
-  /// warm start — see `ScanScreen._maybeAutoConnect`. Empty before the
+  /// warm start — read by `ScanScreen._ensurePermissions` to decide
+  /// whether to auto-navigate straight to ControlScreen. Empty before the
   /// first ever connect.
   ///
   /// We persist plain `remoteId.str` values rather than serialised
