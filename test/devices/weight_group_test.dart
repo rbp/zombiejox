@@ -218,6 +218,36 @@ void main() {
       expect(group.lastSnapshot.failed[_device('AA:01')], same(errors[1]),
           reason: 'second failure must replace the first');
     });
+
+    test(
+        'duplicate add for a device already in `connected` is a no-op '
+        '— prevents two simultaneous connect() attempts to one peripheral',
+        () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        // Hold each connect open so the first add is observably in
+        // flight when the second add runs.
+        final f = FakeDumbbell(d)..delayConnect();
+        fakes.add(f);
+        return f;
+      });
+
+      final first = group.add(_device('AA:01'));
+      await pumpEventQueue();
+      // First add has populated `connected` and is awaiting connect().
+      expect(group.lastSnapshot.connected, hasLength(1));
+      expect(fakes, hasLength(1));
+
+      // Second add for the same device — must not spawn a new Dumbbell.
+      await group.add(_device('AA:01'));
+      expect(fakes, hasLength(1),
+          reason: 'duplicate add must not construct a second Dumbbell');
+      expect(group.lastSnapshot.connected, hasLength(1));
+
+      // Release the first add to drain.
+      fakes.single.completeConnect();
+      await first;
+    });
   });
 
   group('snapshot field derivations', () {

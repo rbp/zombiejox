@@ -124,6 +124,12 @@ class WeightGroup {
   /// entry from a prior failed attempt is cleared atomically with the
   /// retry's dumbbell appearing in `connected`.
   ///
+  /// Idempotent against an existing member for the same [DeviceRef]: if
+  /// a dumbbell for `device` is already in `connected` (connecting or
+  /// ready), the call is a no-op. Prevents a duplicated entry in
+  /// `widget.devices` or a rapid-double-tap on retry from spawning two
+  /// simultaneous `Dumbbell.connect` attempts to the same peripheral.
+  ///
   /// Returns a future that completes when the connect attempt resolves
   /// — successfully or with the new failure already in the snapshot.
   /// The future does NOT surface connect failures; observe the snapshot
@@ -135,6 +141,17 @@ class WeightGroup {
   Future<void> add(DeviceRef device) async {
     if (_disposed) {
       throw StateError('WeightGroup is disposed');
+    }
+    // De-dupe against an existing member for the same DeviceRef. The
+    // retry UX (FailedDeviceCard's refresh icon) is built around
+    // tapping after a failure, by which point the device is no longer
+    // in `connected`, so this guard only fires on
+    // duplicated-in-widget.devices or rapid-double-tap-on-retry
+    // scenarios. Silent no-op rather than throw because that's the
+    // ergonomic the caller wants — "an attempt is already in flight,
+    // observe the snapshot for the outcome."
+    if (_dumbbells.any((d) => d.device == device)) {
+      return;
     }
     final db = _newDumbbell(device);
     _dumbbells.add(db);
@@ -222,8 +239,11 @@ class WeightGroup {
     final all = List<Dumbbell>.from(_dumbbells);
     _dumbbells.clear();
     _failed.clear();
-    // Cancel before mutating _lastSeen so any racing state listener
-    // bails on the lookup guard.
+    // Clear _lastSeen first so any racing state notification arriving
+    // mid-cancel bails on `_onStateUpdate`'s containsKey guard — the
+    // `cancel()` calls below are awaited best-effort, and we don't want
+    // a late event to slip through during that window and emit a
+    // post-teardown snapshot.
     final subs =
         List<StreamSubscription<DumbbellState>>.from(_stateSubs.values);
     _stateSubs.clear();
@@ -268,9 +288,27 @@ class WeightGroup {
     var anyReady = false;
     final knownUnits = <WeightUnit>{};
     var knownUnitCount = 0;
+    // Every derived field gates on `Dumbbell.isReady` rather than just
+    // `lastState != null`. `Dumbbell.disconnect()` does not clear
+    // `lastState`, so a hypothetical disconnected-but-still-in-
+    // `_dumbbells` member would otherwise keep contributing stale data
+    // (e.g. a stale `motorActive: true` could spuriously disable the
+    // weight grid). In practice both `add()`'s catch and
+    // `disconnectAll()` remove members from `_dumbbells` before calling
+    // `Dumbbell.disconnect`, but the cheaper invariant is "ready
+    // members drive the snapshot, period."
+    //
+    // The real [Dumbbell] enforces `isReady => lastState != null`, so
+    // the second check below is theoretically redundant. We keep it
+    // because test fakes have historically used a looser definition
+    // (e.g. flipping `isReady` true from inside `connect()` before any
+    // state arrives) and a null-deref here would be a needlessly
+    // brittle coupling to the contract.
     for (final d in _dumbbells) {
+      if (!d.isReady) continue;
       final s = d.lastState;
       if (s == null) continue;
+      anyReady = true;
       if (!consensusBroken) {
         if (consensus == null) {
           consensus = s.weightIndex;
@@ -280,13 +318,10 @@ class WeightGroup {
         }
       }
       if (s.motorActive) anyMoving = true;
-      if (d.isReady) {
-        anyReady = true;
-        final u = weightUnitFromRawByte(s.unitRaw);
-        if (u != null) {
-          knownUnits.add(u);
-          knownUnitCount++;
-        }
+      final u = weightUnitFromRawByte(s.unitRaw);
+      if (u != null) {
+        knownUnits.add(u);
+        knownUnitCount++;
       }
     }
     return GroupSnapshot(
