@@ -82,16 +82,23 @@ class _ControlScreenState extends State<ControlScreen> {
     for (final d in removed) {
       _stateSubs.remove(d)?.cancel();
     }
-    // Subscribe to newly-added members.
+    // Subscribe to newly-added members. Each subscription keeps a private
+    // `lastSeen` so a no-op `0xD2` (same weightIndex, same motor state)
+    // doesn't trigger a screen-wide rebuild. Real devices broadcast
+    // `0xD2` ~1 Hz; without this filter the whole `_Body` (every card,
+    // the 8-button grid) would rebuild once per second per connected
+    // dumbbell forever.
     for (final d in current) {
-      _stateSubs.putIfAbsent(
-        d,
-        () => d.states.listen((_) {
+      _stateSubs.putIfAbsent(d, () {
+        DumbbellState? lastSeen = d.lastState;
+        return d.states.listen((next) {
+          if (next == lastSeen) return;
+          lastSeen = next;
           if (mounted) setState(() {});
           _maybeFireOnAnyConnected();
           _tickAutoMatcher();
-        }),
-      );
+        });
+      });
     }
     if (mounted) setState(() {});
     _maybeFireOnAnyConnected();
