@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../state/permission_request_flow.dart';
 import '../state/preferences.dart';
 import 'scan_screen.dart';
 
@@ -13,6 +14,10 @@ import 'scan_screen.dart';
 /// later revokes permission via Settings.app, [ScanScreen] detects the loss
 /// and `pushReplacement`'s back here rather than handling it inline. Keeping
 /// the rationale + denied + "Open Settings" UI in one place avoids drift.
+///
+/// The transitions (rationale → requesting → denied / granted, plus the
+/// soft-denial-on-platform-exception rule) live in
+/// [PermissionRequestFlow] so they're testable as plain Dart.
 class PermissionScreen extends StatefulWidget {
   final Preferences preferences;
 
@@ -61,38 +66,27 @@ class PermissionScreen extends StatefulWidget {
 }
 
 class _PermissionScreenState extends State<PermissionScreen> {
-  bool _denied = false;
-  bool _requesting = false;
+  // Re-read `widget.requestPermissions` on every call so that if the
+  // parent rebuilds with a different seam (e.g. a test swapping it
+  // mid-screen), the next Continue tap picks up the new callback rather
+  // than the one that was current when the flow was constructed.
+  late final PermissionRequestFlow _flow = PermissionRequestFlow(
+    request: () => (widget.requestPermissions ??
+        PermissionScreen._defaultRequestPermissions)(),
+  );
+
+  @override
+  void dispose() {
+    _flow.dispose();
+    super.dispose();
+  }
 
   Future<void> _onContinue() async {
-    if (_requesting) return;
-    setState(() => _requesting = true);
-
-    final request = widget.requestPermissions ??
-        PermissionScreen._defaultRequestPermissions;
-
-    // A platform-channel failure (e.g. MissingPluginException, transient
-    // plugin error) shouldn't leave the button stuck on "Requesting…" or
-    // bubble up as an uncaught async exception. Treat it as a soft denial:
-    // the user still ends up on the denied screen with the Open Settings
-    // escape hatch.
-    bool granted;
-    try {
-      granted = await request();
-    } catch (_) {
-      granted = false;
-    }
-
+    final granted = await _flow.requestPermissions();
     if (!mounted) return;
-
     if (granted) {
       final onGranted = widget.onGranted ?? widget._defaultOnGranted;
       onGranted(context);
-    } else {
-      setState(() {
-        _requesting = false;
-        _denied = true;
-      });
     }
   }
 
@@ -107,59 +101,66 @@ class _PermissionScreenState extends State<PermissionScreen> {
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Icon(
-                Icons.bluetooth,
-                size: 72,
-                color: theme.colorScheme.primary,
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'ZombieJox needs Bluetooth',
-                style: theme.textTheme.headlineMedium,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                _denied
-                    ? 'Permission was denied. ZombieJox can\'t talk to your '
-                        'JaxJox dumbbells without Bluetooth access. You can '
-                        'grant it in your phone\'s settings.'
-                    : 'ZombieJox uses Bluetooth to talk to your JaxJox '
-                        'dumbbells. No data leaves your phone — no cloud, no '
-                        'account, no telemetry.',
-                style: theme.textTheme.bodyLarge,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 32),
-              if (_denied) ...[
-                FilledButton(
-                  onPressed: _openSettings,
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Text('Open Settings'),
+          child: ValueListenableBuilder<PermissionFlowState>(
+            valueListenable: _flow.state,
+            builder: (context, state, _) {
+              final denied = state == PermissionFlowState.denied;
+              final requesting = state == PermissionFlowState.requesting;
+              return Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Icon(
+                    Icons.bluetooth,
+                    size: 72,
+                    color: theme.colorScheme.primary,
                   ),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton(
-                  onPressed: () => setState(() => _denied = false),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Text('Try again'),
+                  const SizedBox(height: 24),
+                  Text(
+                    'ZombieJox needs Bluetooth',
+                    style: theme.textTheme.headlineMedium,
+                    textAlign: TextAlign.center,
                   ),
-                ),
-              ] else
-                FilledButton(
-                  onPressed: _requesting ? null : _onContinue,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Text(_requesting ? 'Requesting…' : 'Continue'),
+                  const SizedBox(height: 16),
+                  Text(
+                    denied
+                        ? 'Permission was denied. ZombieJox can\'t talk to your '
+                            'JaxJox dumbbells without Bluetooth access. You can '
+                            'grant it in your phone\'s settings.'
+                        : 'ZombieJox uses Bluetooth to talk to your JaxJox '
+                            'dumbbells. No data leaves your phone — no cloud, no '
+                            'account, no telemetry.',
+                    style: theme.textTheme.bodyLarge,
+                    textAlign: TextAlign.center,
                   ),
-                ),
-            ],
+                  const SizedBox(height: 32),
+                  if (denied) ...[
+                    FilledButton(
+                      onPressed: _openSettings,
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Text('Open Settings'),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton(
+                      onPressed: _flow.tryAgain,
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Text('Try again'),
+                      ),
+                    ),
+                  ] else
+                    FilledButton(
+                      onPressed: requesting ? null : _onContinue,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Text(requesting ? 'Requesting…' : 'Continue'),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ),
       ),
