@@ -50,7 +50,7 @@ void main() {
       expect(outcomes, hasLength(1));
       expect(outcomes.single.outcome, AutoMatchOutcome.matched);
       expect(outcomes.single.unit, WeightUnit.kg);
-      expect(prefs.getUnit(), WeightUnit.kg);
+      expect(prefs.unit.value, WeightUnit.kg);
     });
 
     test('agreement but value already matches → no outcome', () async {
@@ -88,7 +88,7 @@ void main() {
       expect(outcomes, hasLength(1));
       expect(outcomes.single.outcome, AutoMatchOutcome.disagreement);
       expect(outcomes.single.unit, isNull);
-      expect(prefs.getUnit(), WeightUnit.lbs);
+      expect(prefs.unit.value, WeightUnit.lbs);
     });
 
     test('user explicitly chose → no outcome, ever', () async {
@@ -110,7 +110,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(outcomes, isEmpty);
-      expect(prefs.getUnit(), WeightUnit.lbs);
+      expect(prefs.unit.value, WeightUnit.lbs);
     });
 
     test('zero known units → no decision, no flag latched', () async {

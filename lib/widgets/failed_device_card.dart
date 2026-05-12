@@ -7,19 +7,18 @@ import '../ble/device_display.dart';
 /// matches `DumbbellCard` but with an error-coloured "Failed to connect"
 /// status line and a refresh icon for retrying.
 ///
-/// Pure UI: takes the device, the optional error (rendered as a tooltip
-/// on the icon), and a retry callback. Owning state lives on
-/// `ControlScreen`.
+/// Pure UI: takes the device, the error (rendered as a tooltip on the
+/// icon), and a retry callback. Owning state lives on `ControlScreen`.
 class FailedDeviceCard extends StatelessWidget {
   final BluetoothDevice device;
-  final Object? error;
-  final VoidCallback? onRetry;
+  final Object error;
+  final VoidCallback onRetry;
 
   const FailedDeviceCard({
     super.key,
     required this.device,
-    this.error,
-    this.onRetry,
+    required this.error,
+    required this.onRetry,
   });
 
   @override
@@ -53,7 +52,7 @@ class FailedDeviceCard extends StatelessWidget {
             ),
             IconButton(
               icon: const Icon(Icons.refresh),
-              tooltip: error == null ? 'Try again' : 'Try again — $error',
+              tooltip: 'Try again — $error',
               onPressed: onRetry,
             ),
           ],

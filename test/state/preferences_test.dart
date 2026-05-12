@@ -11,7 +11,7 @@ void main() {
   group('unit', () {
     test('first read defaults to a valid unit (locale-derived)', () async {
       final prefs = await Preferences.load();
-      final unit = prefs.getUnit();
+      final unit = prefs.unit.value;
       // The locale default depends on the test host; we only assert it's a
       // valid value.
       expect([WeightUnit.lbs, WeightUnit.kg], contains(unit));
@@ -21,12 +21,12 @@ void main() {
       {
         final prefs = await Preferences.load();
         await prefs.setUnit(WeightUnit.kg);
-        expect(prefs.getUnit(), WeightUnit.kg);
+        expect(prefs.unit.value, WeightUnit.kg);
       }
       // Re-load — should read the persisted value, not the locale default.
       {
         final prefs = await Preferences.load();
-        expect(prefs.getUnit(), WeightUnit.kg);
+        expect(prefs.unit.value, WeightUnit.kg);
       }
     });
 
@@ -34,12 +34,12 @@ void main() {
       final prefs = await Preferences.load();
       await prefs.setUnit(WeightUnit.kg);
       await prefs.setUnit(WeightUnit.lbs);
-      expect(prefs.getUnit(), WeightUnit.lbs);
+      expect(prefs.unit.value, WeightUnit.lbs);
     });
 
     test('unit ValueListenable fires on change, not on no-op set', () async {
       final prefs = await Preferences.load();
-      final initial = prefs.getUnit();
+      final initial = prefs.unit.value;
       final other = initial == WeightUnit.lbs ? WeightUnit.kg : WeightUnit.lbs;
 
       var notifications = 0;
@@ -62,11 +62,6 @@ void main() {
       prefs.unit.removeListener(listener);
     });
 
-    test('getUnit() and unit.value agree', () async {
-      final prefs = await Preferences.load();
-      await prefs.setUnit(WeightUnit.kg);
-      expect(prefs.getUnit(), prefs.unit.value);
-    });
   });
 
   group('rememberedDeviceIds', () {
@@ -133,7 +128,7 @@ void main() {
       // A user opening Settings, looking at the toggle, and tapping the
       // already-selected option still counts as an explicit choice.
       final prefs = await Preferences.load();
-      final current = prefs.getUnit();
+      final current = prefs.unit.value;
       await prefs.setUnit(current);
       expect(prefs.unitExplicitlyChosen, isTrue);
     });
@@ -146,7 +141,7 @@ void main() {
       // the locale. The user opens Settings, taps the already-selected
       // option — that's still an explicit pick.
       final prefs = await Preferences.load();
-      final picked = prefs.getUnit();
+      final picked = prefs.unit.value;
       await prefs.setUnit(picked);
 
       // Simulate a re-launch where the locale now disagrees with the
@@ -156,7 +151,7 @@ void main() {
       // path, the reload reads it instead of falling back to the
       // locale derivation.
       final reloaded = await Preferences.load();
-      expect(reloaded.getUnit(), picked,
+      expect(reloaded.unit.value, picked,
           reason: 'an explicit re-tap of the current value must still persist '
               "the unit string so a later locale shift can't override it");
       expect(reloaded.unitExplicitlyChosen, isTrue);
@@ -166,12 +161,12 @@ void main() {
         'setUnitIfNotExplicit changes the value and returns true when '
         'the flag is false', () async {
       final prefs = await Preferences.load();
-      final initial = prefs.getUnit();
+      final initial = prefs.unit.value;
       final other = initial == WeightUnit.lbs ? WeightUnit.kg : WeightUnit.lbs;
 
       final changed = await prefs.setUnitIfNotExplicit(other);
       expect(changed, isTrue);
-      expect(prefs.getUnit(), other);
+      expect(prefs.unit.value, other);
       // Auto-matching does NOT mark the unit as explicitly chosen — a
       // later auto-match (or the user opening Settings) is still allowed
       // to fire.
@@ -181,7 +176,7 @@ void main() {
     test('setUnitIfNotExplicit returns false when the value already matches',
         () async {
       final prefs = await Preferences.load();
-      final current = prefs.getUnit();
+      final current = prefs.unit.value;
       final changed = await prefs.setUnitIfNotExplicit(current);
       expect(changed, isFalse);
     });
@@ -193,7 +188,7 @@ void main() {
 
       final changed = await prefs.setUnitIfNotExplicit(WeightUnit.kg);
       expect(changed, isFalse);
-      expect(prefs.getUnit(), WeightUnit.lbs,
+      expect(prefs.unit.value, WeightUnit.lbs,
           reason: 'explicit choice must not be overridden by auto-match');
     });
   });
