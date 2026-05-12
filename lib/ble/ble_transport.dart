@@ -2,14 +2,14 @@ import 'ble_connection_state.dart';
 import 'device_ref.dart';
 
 /// Per-device BLE transport — the seam between the protocol layer and any
-/// concrete BLE plugin.
-///
-/// Implementations:
-///   - `BleConnection` (in `ble_service.dart`) — the production adapter
-///     backed by `flutter_blue_plus`.
-///   - Test fakes can implement this directly, but most tests today still
-///     subclass `Dumbbell` and override its public methods — that path
-///     bypasses [BleTransport] entirely, which is fine.
+/// concrete BLE plugin. `BleConnection` (in `ble_service.dart`) is the
+/// only implementation, and `Dumbbell` picks it directly in its
+/// constructor; what the interface buys us is that everything `Dumbbell`
+/// exposes upward — and therefore everything `state/`, `screens/`, and
+/// `widgets/` consume — is typed against [BleTransport] + [DeviceRef], so
+/// the `flutter_blue_plus` types stay contained inside `lib/ble/`. Tests
+/// fake [Dumbbell] by subclassing it directly and overriding its public
+/// methods — that path bypasses [BleTransport] entirely.
 ///
 /// Lifecycle: [connect] → use → [disconnect]. [disconnect] is idempotent
 /// and best-effort: callers can invoke it after a successful [connect],
