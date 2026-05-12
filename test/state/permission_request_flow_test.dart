@@ -109,6 +109,39 @@ void main() {
     });
 
     test(
+        'requestPermissions resolving after dispose does not throw — the '
+        'widget that owns the flow can unmount while the OS prompt is up',
+        () async {
+      final completer = Completer<bool>();
+      final flow = PermissionRequestFlow(request: () => completer.future);
+
+      final pending = flow.requestPermissions();
+      expect(flow.state.value, PermissionFlowState.requesting);
+
+      // Owner tears down while the prompt is still in flight.
+      flow.dispose();
+
+      // Both terminal arms of the await (denial value + thrown exception)
+      // must short-circuit cleanly rather than writing to the disposed
+      // ValueNotifier.
+      completer.complete(false);
+      final granted = await pending;
+      expect(granted, isFalse);
+
+      // After dispose, further calls are no-ops too.
+      expect(await flow.requestPermissions(), isFalse);
+      flow.tryAgain();
+    });
+
+    test(
+        'dispose is idempotent — a second dispose call is a no-op rather '
+        'than throwing on the already-disposed ValueNotifier', () {
+      final flow = PermissionRequestFlow(request: () async => true);
+      flow.dispose();
+      flow.dispose(); // must not throw
+    });
+
+    test(
         'after tryAgain, a fresh requestPermissions runs as a new attempt '
         '— retry path works end-to-end', () async {
       var attempts = 0;

@@ -49,6 +49,7 @@ class PermissionRequestFlow {
   final Future<bool> Function() _request;
   final ValueNotifier<PermissionFlowState> _state =
       ValueNotifier(PermissionFlowState.rationale);
+  bool _disposed = false;
 
   /// The current state. Widgets can listen via [ValueListenableBuilder].
   ValueListenable<PermissionFlowState> get state => _state;
@@ -57,9 +58,11 @@ class PermissionRequestFlow {
   /// Returns `true` iff the prompt was granted — caller is expected to
   /// navigate away; this flow does not transition out of `requesting` on
   /// success because the screen will be torn down. Returns `false` on
-  /// denial, on platform exception, and on a re-entrant call while a
-  /// prior request is still in flight.
+  /// denial, on platform exception, on a re-entrant call while a prior
+  /// request is still in flight, and on any resolution that lands after
+  /// [dispose].
   Future<bool> requestPermissions() async {
+    if (_disposed) return false;
     if (_state.value == PermissionFlowState.requesting) return false;
     _state.value = PermissionFlowState.requesting;
 
@@ -70,6 +73,10 @@ class PermissionRequestFlow {
       granted = false;
     }
 
+    // The widget owning this flow may have been unmounted while the OS
+    // prompt was up. Writing to a disposed ValueNotifier throws — short-
+    // circuit instead.
+    if (_disposed) return false;
     if (granted) return true;
     _state.value = PermissionFlowState.denied;
     return false;
@@ -79,11 +86,14 @@ class PermissionRequestFlow {
   /// [PermissionFlowState.rationale]. No-op from any other state — in
   /// particular, this does NOT cancel an in-flight request.
   void tryAgain() {
+    if (_disposed) return;
     if (_state.value != PermissionFlowState.denied) return;
     _state.value = PermissionFlowState.rationale;
   }
 
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
     _state.dispose();
   }
 }

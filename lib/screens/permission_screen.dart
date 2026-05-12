@@ -66,9 +66,13 @@ class PermissionScreen extends StatefulWidget {
 }
 
 class _PermissionScreenState extends State<PermissionScreen> {
+  // Re-read `widget.requestPermissions` on every call so that if the
+  // parent rebuilds with a different seam (e.g. a test swapping it
+  // mid-screen), the next Continue tap picks up the new callback rather
+  // than the one that was current when the flow was constructed.
   late final PermissionRequestFlow _flow = PermissionRequestFlow(
-    request: widget.requestPermissions ??
-        PermissionScreen._defaultRequestPermissions,
+    request: () => (widget.requestPermissions ??
+        PermissionScreen._defaultRequestPermissions)(),
   );
 
   @override

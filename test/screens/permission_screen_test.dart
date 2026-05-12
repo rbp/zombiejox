@@ -84,4 +84,42 @@ void main() {
     expect(find.text('Continue'), findsOneWidget);
     expect(find.text('Try again'), findsNothing);
   });
+
+  testWidgets(
+      'a parent rebuild that swaps `requestPermissions` takes effect on '
+      'the next Continue tap — the flow re-reads the seam at call time, '
+      'so a stale closure captured in initState does not get reused',
+      (tester) async {
+    final prefs = await _freshPrefs();
+
+    var current = () async => false;
+    Widget tree() => MaterialApp(
+          home: PermissionScreen(
+            preferences: prefs,
+            requestPermissions: () => current(),
+            onGranted: (_) {},
+          ),
+        );
+
+    await tester.pumpWidget(tree());
+
+    // First tap with the deny-callback → lands in the denied state.
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Try again'), findsOneWidget);
+
+    // Swap the callback to one that grants, rebuild the parent, then
+    // recover to rationale and tap Continue again. If the flow snapshotted
+    // the old closure at construction the second tap would still deny.
+    current = () async => true;
+    await tester.pumpWidget(tree());
+    await tester.tap(find.text('Try again'));
+    await tester.pump();
+    expect(find.text('Continue'), findsOneWidget);
+
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    // Granted path leaves the rationale view (no Try again surfaced).
+    expect(find.text('Try again'), findsNothing);
+  });
 }
