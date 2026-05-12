@@ -6,6 +6,7 @@ import '../ble/ble_service.dart';
 import '../protocol/dumbbell_state.dart';
 import '../protocol/frame.dart';
 import '../protocol/opcodes.dart';
+import '../state/weights.dart' show kJaxJoxWeightCount;
 
 /// Drives a single DumbbellConnect (`DB200`) device.
 ///
@@ -86,7 +87,14 @@ class Dumbbell {
   }
 
   Future<void> setWeightIndex(int index) {
-    assert(index >= 0 && index < 8, 'weight index must be 0..7');
+    // Real `RangeError`, not an `assert` — out-of-range payloads to a piece
+    // of motorised hardware shouldn't be a debug-only guard. `0x27` (in
+    // the protocol doc) is the canonical example of what can go wrong
+    // when a bad write reaches the dock; out-of-range `0xD6` is in the
+    // same caution class.
+    if (index < 0 || index >= kJaxJoxWeightCount) {
+      throw RangeError.range(index, 0, kJaxJoxWeightCount - 1, 'index');
+    }
     if (_disposed) return Future.value();
     return _ble.writeTx(buildFrame(Opcodes.setWeight, [index]));
   }

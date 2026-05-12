@@ -106,6 +106,10 @@ class _ScanScreenState extends State<ScanScreen> {
       if (FlutterBluePlus.isScanningNow) {
         await FlutterBluePlus.stopScan();
       }
+      // The native filter (`withKeywords`) is an efficiency hint — it
+      // cuts BLE advertisement churn. The *authoritative* filter is
+      // `_isJaxJox` applied to the stream results below, which also
+      // rejects DFU-mode names ending in `U`.
       await FlutterBluePlus.startScan(
         withKeywords: kJaxJoxNamePrefixes,
         timeout: const Duration(seconds: 30),
