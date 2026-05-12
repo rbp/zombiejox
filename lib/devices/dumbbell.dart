@@ -63,11 +63,6 @@ class Dumbbell {
   /// (see `FakeDumbbell` in `test/devices/weight_group_test.dart`).
   Dumbbell(this.device) : _ble = BleConnection(device);
 
-  /// Test-only escape hatch: inject a pre-built [BleTransport]. Used by
-  /// fakes that drive `Dumbbell` end-to-end through the transport seam
-  /// rather than overriding its public methods.
-  Dumbbell.withTransport(this.device, this._ble);
-
   Future<void> connect() async {
     if (_disposed) return;
     await _ble.connect();
