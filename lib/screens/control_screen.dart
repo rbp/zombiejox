@@ -7,6 +7,7 @@ import '../devices/dumbbell.dart';
 import '../devices/weight_group.dart';
 import '../protocol/dumbbell_state.dart';
 import '../state/preferences.dart';
+import '../state/unit_auto_matcher.dart';
 import '../state/weights.dart';
 import '../widgets/dumbbell_card.dart';
 import '../widgets/failed_device_card.dart';
@@ -58,15 +59,10 @@ class _ControlScreenState extends State<ControlScreen> {
   final Map<Dumbbell, StreamSubscription<DumbbellState>> _stateSubs = {};
   bool _onAnyConnectedFired = false;
 
-  // Auto-match-from-dock: once any group member reports a known unit byte,
-  // we wait for the rest to be accounted for (ready or failed) — or
-  // 1.5s of no-new-state, whichever comes first — and then decide whether
-  // to nudge the app's display unit to match the dumbbells'. Sticky per
-  // screen instance: re-pushing ControlScreen re-arms it; popping back
-  // doesn't.
-  Timer? _autoMatchTimer;
-  bool _autoMatchDecided = false;
-  static const Duration _autoMatchDebounce = Duration(milliseconds: 1500);
+  late final UnitAutoMatcher _autoMatcher = UnitAutoMatcher(
+    preferences: widget.preferences,
+    onOutcome: _onAutoMatchOutcome,
+  );
 
   @override
   void initState() {
@@ -86,20 +82,27 @@ class _ControlScreenState extends State<ControlScreen> {
     for (final d in removed) {
       _stateSubs.remove(d)?.cancel();
     }
-    // Subscribe to newly-added members.
+    // Subscribe to newly-added members. Each subscription keeps a private
+    // `lastSeen` so a no-op `0xD2` (same weightIndex, same motor state)
+    // doesn't trigger a screen-wide rebuild. Real devices broadcast
+    // `0xD2` ~1 Hz; without this filter the whole `_Body` (every card,
+    // the 8-button grid) would rebuild once per second per connected
+    // dumbbell forever.
     for (final d in current) {
-      _stateSubs.putIfAbsent(
-        d,
-        () => d.states.listen((_) {
+      _stateSubs.putIfAbsent(d, () {
+        DumbbellState? lastSeen = d.lastState;
+        return d.states.listen((next) {
+          if (next == lastSeen) return;
+          lastSeen = next;
           if (mounted) setState(() {});
           _maybeFireOnAnyConnected();
-          _maybeArmAutoMatch();
-        }),
-      );
+          _tickAutoMatcher();
+        });
+      });
     }
     if (mounted) setState(() {});
     _maybeFireOnAnyConnected();
-    _maybeArmAutoMatch();
+    _tickAutoMatcher();
   }
 
   /// Fires [ControlScreen.onAnyConnected] exactly once, the first time any
@@ -114,104 +117,43 @@ class _ControlScreenState extends State<ControlScreen> {
     widget.onAnyConnected?.call();
   }
 
-  /// Auto-match the app's display unit to whatever the connected dumbbells
-  /// say they're set to (via `0xD1` byte 8 → `DumbbellState.unitRaw` →
-  /// [weightUnitFromRawByte]).
-  ///
-  /// Bails if (a) we've already decided this screen instance, (b) the
-  /// user has explicitly picked a unit in Settings, or (c) no group
-  /// member has a *known* unit byte yet. The "known unit" filter
-  /// matters — [Dumbbell.isReady] becomes true on the post-connect
-  /// battery read, *before* the `0xD1` reply with the unit byte arrives;
-  /// firing on bare `isReady` would race that window and decide with an
-  /// empty units snapshot, permanently disabling auto-match for the
-  /// screen.
-  ///
-  /// When at least one member has a known unit: if every attempted
-  /// device is now accounted for (known-unit or failed) we fire the
-  /// decision immediately; otherwise we arm a 1.5s debounce so a
-  /// slow-to-connect mate can still vote. The debounce is **armed
-  /// once** — subsequent state pushes don't reset it, because real
-  /// devices emit `0xD2` broadcasts ~1 Hz and an indefinitely-resetting
-  /// timer would never fire on its own.
-  void _maybeArmAutoMatch() {
-    if (_autoMatchDecided) return;
-    if (widget.preferences.unitExplicitlyChosen) {
-      _autoMatchDecided = true;
-      return;
+  /// Compute a [UnitsSnapshot] of the current group state and feed it to
+  /// [UnitAutoMatcher.tick]. Hooked from membership changes, every
+  /// per-member state-stream emission, and the connect-failure path.
+  void _tickAutoMatcher() {
+    final knownUnits = <WeightUnit>{};
+    var knownUnitCount = 0;
+    for (final d in _group.dumbbells) {
+      if (!d.isReady) continue;
+      final u = weightUnitFromRawByte(d.lastState?.unitRaw);
+      if (u == null) continue;
+      knownUnits.add(u);
+      knownUnitCount++;
     }
-    final withKnownUnit = _group.dumbbells.where((d) =>
-        d.isReady && weightUnitFromRawByte(d.lastState?.unitRaw) != null);
-    if (withKnownUnit.isEmpty) return;
-    final accounted = withKnownUnit.length + _failedDevices.length;
-    final allAccountedFor = accounted >= widget.devices.length;
-    if (allAccountedFor) {
-      _autoMatchTimer?.cancel();
-      unawaited(_decideAutoMatch());
-      return;
-    }
-    // First arming only — see method docstring on why we don't reset.
-    if (_autoMatchTimer != null) return;
-    _autoMatchTimer = Timer(_autoMatchDebounce, () {
-      unawaited(_decideAutoMatch());
-    });
+    _autoMatcher.tick((
+      knownUnits: knownUnits,
+      knownUnitCount: knownUnitCount,
+      failedCount: _failedDevices.length,
+      attemptedCount: widget.devices.length,
+    ));
   }
 
-  /// Snapshot the unit byte of every ready member, decide what to do.
-  /// Three outcomes: agreement (auto-set the app unit + SnackBar if it
-  /// actually changed), disagreement (SnackBar pointing the user to
-  /// Settings), or all-unknown (no-op).
-  ///
-  /// Fire-and-forget — callers `unawaited` this. Any exception (e.g. a
-  /// `SharedPreferences` write failure) is swallowed inside; the
-  /// decision flag is already set by then, so we can't usefully retry,
-  /// and a UX nicety isn't worth crashing the screen over.
-  Future<void> _decideAutoMatch() async {
-    if (_autoMatchDecided) return;
-    if (widget.preferences.unitExplicitlyChosen) {
-      _autoMatchDecided = true;
-      return;
-    }
-
-    try {
-      final units = <WeightUnit>{};
-      for (final d in _group.dumbbells.where((d) => d.isReady)) {
-        final u = weightUnitFromRawByte(d.lastState?.unitRaw);
-        if (u != null) units.add(u);
-      }
-
-      // Defensive: with the "known unit" filter in `_maybeArmAutoMatch`
-      // this shouldn't happen in practice, but if some race produces an
-      // empty snapshot here, *don't* mark the decision final — let a
-      // future state emission re-arm us when a known unit shows up.
-      if (units.isEmpty) return;
-      _autoMatchDecided = true;
-
-      if (units.length == 1) {
-        final u = units.single;
-        final changed = await widget.preferences.setUnitIfNotExplicit(u);
-        if (!mounted) return;
-        if (changed) {
-          final label = u == WeightUnit.lbs ? 'lbs' : 'kg';
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text('Unit set to $label to match your dumbbells.')),
-          );
-        }
-      } else {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
+  void _onAutoMatchOutcome(AutoMatchResult result) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    switch (result.outcome) {
+      case AutoMatchOutcome.matched:
+        final label = result.unit == WeightUnit.lbs ? 'lbs' : 'kg';
+        messenger.showSnackBar(
+          SnackBar(content: Text('Unit set to $label to match your dumbbells.')),
+        );
+      case AutoMatchOutcome.disagreement:
+        messenger.showSnackBar(
           const SnackBar(
             content: Text(
                 'Dumbbells are set to different units — pick one in Settings'),
           ),
         );
-      }
-    } catch (e, st) {
-      // A SharedPreferences write failure or a build-context shenanigan
-      // shouldn't tear the screen down. Decision is already marked
-      // fired, so we won't retry — log and move on.
-      debugPrint('auto-match decision failed: $e\n$st');
     }
   }
 
@@ -232,11 +174,11 @@ class _ControlScreenState extends State<ControlScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _failedDevices[device] = e);
-      // A failure changes the "all accounted for" calculus that
-      // _maybeArmAutoMatch reads, so re-check it. If at least one
-      // member is already ready and the rest are now all failed, we
-      // can decide right away instead of waiting on the debounce.
-      _maybeArmAutoMatch();
+      // A failure changes the "all accounted for" calculus the auto-
+      // matcher reads, so tick it again. If at least one member is
+      // already ready and the rest are now all failed, the matcher
+      // decides immediately instead of waiting on the debounce.
+      _tickAutoMatcher();
     }
   }
 
@@ -245,7 +187,7 @@ class _ControlScreenState extends State<ControlScreen> {
     // dispose() can't be async, so each Future is explicitly fire-and-forget
     // via `unawaited`. cancel() / disconnectAll() can't meaningfully fail in
     // a way the user can recover from; we just need to release resources.
-    _autoMatchTimer?.cancel();
+    _autoMatcher.dispose();
     unawaited(_changesSub?.cancel() ?? Future<void>.value());
     for (final s in _stateSubs.values) {
       unawaited(s.cancel());

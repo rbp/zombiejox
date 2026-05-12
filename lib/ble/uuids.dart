@@ -8,16 +8,15 @@ class JaxJoxUuids {
 
   static const String batteryService = '0000180f-0000-1000-8000-00805f9b34fb';
   static const String batteryLevel = '00002a19-0000-1000-8000-00805f9b34fb';
-  static const String deviceInformationService =
-      '0000180a-0000-1000-8000-00805f9b34fb';
 }
 
-/// Advertised-name prefixes by product. Filter scan results to these.
+/// Advertised-name prefixes the scan filter accepts. We deliberately only
+/// match DumbbellConnect (`DB200`) — kettlebell / pushup / foam-roller
+/// firmware speaks a related-but-not-identical protocol and is out of
+/// scope (the on-screen weight grid is dumbbell-shaped, `setWeightIndex`
+/// asserts on the dumbbell's 0..7 range, etc.). Add a prefix here when a
+/// second product is actually wired up end-to-end. See
+/// `docs/ble_protocol.md` §2 for the full prefix catalogue.
+///
 /// Names ending in `U` are firmware-update mode; skip them.
-const Map<String, String> kJaxJoxNamePrefixes = {
-  'DumbbellConnect': 'DB200',
-  'KettlebellConnect 2.0': 'KB200',
-  'KettlebellConnect (legacy)': 'KB42',
-  'PushUpConnect': 'PB220',
-  'FoamRollerConnect': 'FR100',
-};
+const List<String> kJaxJoxNamePrefixes = ['DB200'];

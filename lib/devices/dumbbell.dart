@@ -6,6 +6,7 @@ import '../ble/ble_service.dart';
 import '../protocol/dumbbell_state.dart';
 import '../protocol/frame.dart';
 import '../protocol/opcodes.dart';
+import '../state/weights.dart' show kJaxJoxWeightCount;
 
 /// Drives a single DumbbellConnect (`DB200`) device.
 ///
@@ -24,19 +25,29 @@ class Dumbbell {
   DumbbellState? _last;
   DumbbellState? get lastState => _last;
 
+  /// Battery percentage read from the standard BLE Battery Service during
+  /// [connect], stashed here until the first real `0xD1`/`0xD2` arrives
+  /// — at which point [_onBytes] folds it into the emitted state and
+  /// clears it. The alternative (fabricating a synthetic `DumbbellState`
+  /// from a battery byte alone) would flip [isReady] true before any
+  /// unit byte has been observed, which downstream auto-match logic
+  /// (`UnitAutoMatcher` via `ControlScreen`) would then have to work
+  /// around. Keep the asymmetry here, not in the consumer.
+  int? _pendingBatteryPct;
+
   /// Set to `true` by [disconnect]. Once true, [connect] / [setWeightIndex] /
   /// [_onBytes] short-circuit so a teardown that races against an in-flight
   /// `connect()` cleans up gracefully without throwing on a closed stream or
   /// writing to a torn-down characteristic.
   bool _disposed = false;
 
-  /// True once the dumbbell has reported any state AND has not been
-  /// disconnected. Implies `connect()`'s `_ble.connect()` step finished
-  /// successfully (TX/RX characteristics are initialized) AND we've received
-  /// either the post-connect battery read or at least one `0xD2`/`0xD1`
-  /// notification. Use this to gate `setWeightIndex()` calls — calling it
-  /// before this is true would hit a `LateInitializationError` on the
-  /// underlying TX characteristic.
+  /// True once the dumbbell has reported a real `0xD1` / `0xD2` state
+  /// frame AND has not been disconnected. Implies `connect()`'s
+  /// `_ble.connect()` step finished successfully (TX/RX characteristics
+  /// are initialized) AND the device has sent at least one state
+  /// notification — i.e. it's responsive on the protocol channel, not
+  /// just connected at the BLE level. Use this to gate
+  /// `setWeightIndex()` calls.
   ///
   /// Reads via the public [lastState] getter so subclasses (test fakes) that
   /// override it are honoured.
@@ -64,15 +75,27 @@ class Dumbbell {
     if (_disposed) return;
     final battery = await _ble.readBatteryLevel();
     if (_disposed) return;
-    if (battery != null && !_states.isClosed) {
-      _last = (_last ?? const DumbbellState(weightIndex: 0, motorActive: false))
-          .copyWith(batteryPct: battery);
+    if (battery == null) return;
+    if (_last != null && !_states.isClosed) {
+      // A `0xD1` or `0xD2` already arrived — fold the battery byte into
+      // the existing state and emit.
+      _last = _last!.copyWith(batteryPct: battery);
       _states.add(_last!);
+    } else {
+      // No state frame yet — stash for `_onBytes` to merge in.
+      _pendingBatteryPct = battery;
     }
   }
 
   Future<void> setWeightIndex(int index) {
-    assert(index >= 0 && index < 8, 'weight index must be 0..7');
+    // Real `RangeError`, not an `assert` — out-of-range payloads to a piece
+    // of motorised hardware shouldn't be a debug-only guard. `0x27` (in
+    // the protocol doc) is the canonical example of what can go wrong
+    // when a bad write reaches the dock; out-of-range `0xD6` is in the
+    // same caution class.
+    if (index < 0 || index >= kJaxJoxWeightCount) {
+      throw RangeError.range(index, 0, kJaxJoxWeightCount - 1, 'index');
+    }
     if (_disposed) return Future.value();
     return _ble.writeTx(buildFrame(Opcodes.setWeight, [index]));
   }
@@ -98,10 +121,18 @@ class Dumbbell {
     if (_disposed) return;
     final frame = parseFrame(bytes);
     if (frame == null) return;
-    final next = applyFrame(_last, frame);
-    if (next != null && !_states.isClosed) {
-      _last = next;
-      _states.add(next);
+    var next = applyFrame(_last, frame);
+    if (next == null || _states.isClosed) return;
+    // Fold a pending battery read into the first emitted state, then
+    // clear the stash so a stale value can't outlive the connection.
+    // Battery Service wins over the 0xD1 payload byte — mirrors the
+    // connect-path override at the `_last != null` branch above, which
+    // picks one source consistently.
+    if (_pendingBatteryPct != null) {
+      next = next.copyWith(batteryPct: _pendingBatteryPct);
+      _pendingBatteryPct = null;
     }
+    _last = next;
+    _states.add(next);
   }
 }

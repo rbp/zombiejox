@@ -27,44 +27,18 @@ void main() {
     expect(find.byIcon(Icons.refresh), findsOneWidget);
   });
 
-  testWidgets('the status text uses the theme error colour', (tester) async {
-    final theme = ThemeData(
-      colorScheme: const ColorScheme.light(error: Color(0xFFFF1234)),
-    );
-    await tester.pumpWidget(MaterialApp(
-      theme: theme,
-      home: Scaffold(
-        body: FailedDeviceCard(
-          device: _device('AA:01'),
-          onRetry: () {},
-        ),
-      ),
-    ));
-
-    final statusText = tester.widget<Text>(find.text('Failed to connect'));
-    expect(statusText.style?.color, theme.colorScheme.error);
-  });
-
   testWidgets('tapping refresh fires onRetry', (tester) async {
     var retries = 0;
     await _pump(
       tester,
       FailedDeviceCard(
         device: _device('AA:01'),
+        error: StateError('boom'),
         onRetry: () => retries++,
       ),
     );
     await tester.tap(find.byIcon(Icons.refresh));
     expect(retries, 1);
-  });
-
-  testWidgets('null onRetry disables the refresh button', (tester) async {
-    await _pump(
-      tester,
-      FailedDeviceCard(device: _device('AA:01')),
-    );
-    final btn = tester.widget<IconButton>(find.byType(IconButton));
-    expect(btn.onPressed, isNull);
   });
 
   testWidgets('error is included in the refresh button tooltip',

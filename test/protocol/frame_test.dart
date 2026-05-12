@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zombiejox/protocol/dumbbell_state.dart';
 import 'package:zombiejox/protocol/frame.dart';
 import 'package:zombiejox/protocol/opcodes.dart';
+import 'package:zombiejox/state/weights.dart';
 
 void main() {
   group('buildFrame', () {
@@ -57,7 +58,7 @@ void main() {
       final s = applyFrame(null, frame!);
       expect(s, isNotNull);
       expect(s!.weightIndex, 3);
-      expect(s.weightLbs, 26);
+      expect(kWeightLbsByIndex[s.weightIndex], 26);
       expect(s.motorActive, false);
       expect(s.batteryPct, 100);
     });
@@ -99,28 +100,36 @@ void main() {
       expect(afterD2.unitRaw, 0x01, reason: 'unitRaw must survive a 0xD2');
     });
 
-    test('0xD2 broadcast updates weight index (docs §5)', () {
-      final frame = parseFrame([
-        0xFF,
-        0x10,
-        0xD2,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x01,
-        0x00,
-        0x00,
-        0x00,
-        0x24
-      ]);
-      final s = applyFrame(null, frame!);
-      expect(s!.weightIndex, 1);
-      expect(s.weightLbs, 14);
+    test('0xD2 broadcast updates weight index on top of an existing state',
+        () {
+      // 0xD2 with prior state -> update the weight index, preserve the rest.
+      final d2 = parseFrame([
+        0xFF, 0x10, 0xD2, 0x00, 0x00, 0x00, 0x00, 0x00, //
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x24
+      ])!;
+      final prior = const DumbbellState(
+        weightIndex: 3,
+        motorActive: false,
+        batteryPct: 80,
+        unitRaw: 0x01,
+      );
+      final s = applyFrame(prior, d2)!;
+      expect(s.weightIndex, 1);
+      expect(kWeightLbsByIndex[s.weightIndex], 14);
+      // Preserves the other fields from the prior 0xD1.
+      expect(s.batteryPct, 80);
+      expect(s.unitRaw, 0x01);
+      expect(s.motorActive, false);
+    });
+
+    test(
+        '0xD2 with no prior state (came in before the 0xD1 reply) returns '
+        'null — better "Connecting…" than a fabricated "8 lbs / Idle"', () {
+      final d2 = parseFrame([
+        0xFF, 0x10, 0xD2, 0x00, 0x00, 0x00, 0x00, 0x00, //
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x24
+      ])!;
+      expect(applyFrame(null, d2), isNull);
     });
   });
 }

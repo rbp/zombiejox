@@ -31,10 +31,9 @@ class Preferences {
   /// User-selected display unit. Defaults to lbs in US/UK/LR/MM locales, kg
   /// elsewhere; overridable via [setUnit]. The setting only affects what the
   /// app shows — the dumbbell's physical display follows its own setting.
+  ///
+  /// Read the synchronous current value via `preferences.unit.value`.
   ValueListenable<WeightUnit> get unit => _unit;
-
-  /// Current value (synchronous read). Equivalent to `unit.value`.
-  WeightUnit getUnit() => _unit.value;
 
   /// Whether the user has *explicitly* picked a unit via the Settings
   /// toggle (vs. the value still being the locale-derived default or an

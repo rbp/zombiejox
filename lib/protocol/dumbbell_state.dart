@@ -1,10 +1,10 @@
-import '../state/weights.dart';
+import '../state/weights.dart' show kJaxJoxWeightCount;
 import 'frame.dart';
 import 'opcodes.dart';
 
-/// `0xD1` byte 6 — motor active. `0x04` is "settled"; other values (e.g. `0x07`
-/// in a query reply) mean the same thing for our purposes — not actively moving.
-/// See `docs/ble_protocol.md` §5.
+/// `0xD1` byte 6 — the only value we treat as "motor active" is `0x0C`.
+/// Everything else (`0x04` settled, `0x07` in a query reply, anything
+/// else) is idle. See `docs/ble_protocol.md` §5.
 const int _motorActive = 0x0C;
 
 class DumbbellState {
@@ -30,10 +30,6 @@ class DumbbellState {
     this.unitRaw,
   });
 
-  /// Convenience: current weight in pounds. Use [formatWeight] from
-  /// `state/weights.dart` if you need a unit-aware display string.
-  int get weightLbs => kWeightLbsByIndex[weightIndex];
-
   DumbbellState copyWith({
     int? weightIndex,
     bool? motorActive,
@@ -46,6 +42,19 @@ class DumbbellState {
         batteryPct: batteryPct ?? this.batteryPct,
         unitRaw: unitRaw ?? this.unitRaw,
       );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DumbbellState &&
+          other.weightIndex == weightIndex &&
+          other.motorActive == motorActive &&
+          other.batteryPct == batteryPct &&
+          other.unitRaw == unitRaw;
+
+  @override
+  int get hashCode =>
+      Object.hash(weightIndex, motorActive, batteryPct, unitRaw);
 }
 
 /// Apply a parsed RX frame to the running state. Returns null if the frame is
@@ -56,22 +65,26 @@ DumbbellState? applyFrame(DumbbellState? prev, ParsedFrame frame) {
       if (frame.payload.length < 6) return prev;
       final idx = frame.payload[1];
       if (idx < 0 || idx >= kJaxJoxWeightCount) return prev;
-      final motion = frame.payload[3];
-      final battery = frame.payload[4];
       // Payload offset 5 = frame byte 8 = unit. See [DumbbellState.unitRaw].
-      final unitRaw = frame.payload[5];
-      return DumbbellState(
+      return (prev ?? const DumbbellState(weightIndex: 0, motorActive: false))
+          .copyWith(
         weightIndex: idx,
-        motorActive: motion == _motorActive,
-        batteryPct: battery,
-        unitRaw: unitRaw,
+        motorActive: frame.payload[3] == _motorActive,
+        batteryPct: frame.payload[4],
+        unitRaw: frame.payload[5],
       );
     case Opcodes.stateBroadcast: // 0xD2 — periodic ~1 Hz
       if (frame.payload.length < 9) return prev;
       final idx = frame.payload[8]; // payload offset 8 == frame byte 11
       if (idx < 0 || idx >= kJaxJoxWeightCount) return prev;
-      return (prev ?? const DumbbellState(weightIndex: 0, motorActive: false))
-          .copyWith(weightIndex: idx);
+      // If `0xD2` arrives before the first `0xD1` reply (rare — `Dumbbell.
+      // connect` sends a query first), we'd otherwise have to synthesize
+      // a default state (`motorActive: false`, no battery, no unit) and
+      // the UI would briefly show a confident "8 lbs / Idle" with no
+      // unit awareness. Return prev (null) instead so the card stays
+      // on "Connecting…" until the real `0xD1` lands.
+      if (prev == null) return prev;
+      return prev.copyWith(weightIndex: idx);
     default:
       return prev;
   }

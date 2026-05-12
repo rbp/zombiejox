@@ -32,12 +32,12 @@ void main() {
       home: SettingsScreen(preferences: prefs),
     ));
 
-    expect(prefs.getUnit(), WeightUnit.lbs);
+    expect(prefs.unit.value, WeightUnit.lbs);
 
     await tester.tap(find.text('kg'));
     await tester.pumpAndSettle();
 
-    expect(prefs.getUnit(), WeightUnit.kg);
+    expect(prefs.unit.value, WeightUnit.kg);
   });
 
   testWidgets('tapping About navigates to the About screen', (tester) async {

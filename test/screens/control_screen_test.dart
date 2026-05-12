@@ -502,7 +502,7 @@ void main() {
       // no debounce wait needed.
       await tester.pumpAndSettle();
 
-      expect(p.getUnit(), WeightUnit.kg);
+      expect(p.unit.value, WeightUnit.kg);
       expect(p.unitExplicitlyChosen, isFalse,
           reason: 'auto-match must not flip the explicit-choice flag');
       expect(find.byType(SnackBar), findsOneWidget);
@@ -530,7 +530,7 @@ void main() {
       fakes.single.emitState(stateWithUnit(unitRaw: 0x01));
       await tester.pumpAndSettle();
 
-      expect(p.getUnit(), WeightUnit.kg);
+      expect(p.unit.value, WeightUnit.kg);
       expect(find.byType(SnackBar), findsNothing,
           reason: 'value already matched ⇒ nothing to announce');
     });
@@ -559,7 +559,7 @@ void main() {
       fakes[1].emitState(stateWithUnit(unitRaw: 0x01)); // kg
       await tester.pumpAndSettle();
 
-      expect(p.getUnit(), WeightUnit.lbs,
+      expect(p.unit.value, WeightUnit.lbs,
           reason: 'disagreement must not change the unit');
       expect(find.textContaining('different units'), findsOneWidget);
     });
@@ -586,7 +586,7 @@ void main() {
       fakes.single.emitState(stateWithUnit(unitRaw: 0x01));
       await tester.pumpAndSettle();
 
-      expect(p.getUnit(), WeightUnit.lbs);
+      expect(p.unit.value, WeightUnit.lbs);
       expect(find.byType(SnackBar), findsNothing);
     });
 
@@ -615,7 +615,7 @@ void main() {
       // debounce window so the timer hasn't fired yet.
       fakes[0].emitState(stateWithUnit(unitRaw: 0x01));
       await tester.pump(const Duration(milliseconds: 1000));
-      expect(p.getUnit(), WeightUnit.lbs,
+      expect(p.unit.value, WeightUnit.lbs,
           reason: 'still within debounce, no decision yet');
 
       // The second member finally arrives with a disagreeing value.
@@ -623,7 +623,7 @@ void main() {
       fakes[1].emitState(stateWithUnit(unitRaw: 0x00));
       await tester.pumpAndSettle();
 
-      expect(p.getUnit(), WeightUnit.lbs, reason: 'disagreement ⇒ no change');
+      expect(p.unit.value, WeightUnit.lbs, reason: 'disagreement ⇒ no change');
       expect(find.textContaining('different units'), findsOneWidget);
     });
 
@@ -655,7 +655,7 @@ void main() {
 
       // 1 ready + 1 failed = 2 attempted: "all accounted for". Decision
       // fires immediately without consuming the full 1.5s debounce.
-      expect(p.getUnit(), WeightUnit.kg);
+      expect(p.unit.value, WeightUnit.kg);
       expect(find.textContaining('Unit set to kg'), findsOneWidget);
     });
 
@@ -681,7 +681,7 @@ void main() {
       fakes.single.emitState(stateWithUnit(unitRaw: 0x42));
       await tester.pumpAndSettle();
 
-      expect(p.getUnit(), WeightUnit.lbs);
+      expect(p.unit.value, WeightUnit.lbs);
       expect(find.byType(SnackBar), findsNothing);
     });
 
@@ -719,7 +719,7 @@ void main() {
         batteryPct: 80,
       ));
       await tester.pumpAndSettle();
-      expect(p.getUnit(), WeightUnit.lbs,
+      expect(p.unit.value, WeightUnit.lbs,
           reason: 'no known unit yet — must not decide');
       expect(find.byType(SnackBar), findsNothing);
 
@@ -727,7 +727,7 @@ void main() {
       fakes.single.emitState(stateWithUnit(unitRaw: 0x01));
       await tester.pumpAndSettle();
 
-      expect(p.getUnit(), WeightUnit.kg,
+      expect(p.unit.value, WeightUnit.kg,
           reason: 'auto-match must still fire once the unit byte arrives');
       expect(find.textContaining('Unit set to kg'), findsOneWidget);
     });
@@ -761,7 +761,7 @@ void main() {
       // accounted for", so the 1.5s debounce arms.
       fakes[0].emitState(stateWithUnit(unitRaw: 0x01));
       await tester.pump(const Duration(milliseconds: 500));
-      expect(p.getUnit(), WeightUnit.lbs,
+      expect(p.unit.value, WeightUnit.lbs,
           reason: 'still within debounce — no decision yet');
 
       // Three more state pushes from the now-ready dumbbell at ~1 Hz —
@@ -778,7 +778,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
 
-      expect(p.getUnit(), WeightUnit.kg,
+      expect(p.unit.value, WeightUnit.kg,
           reason: 'the timer was armed at the first qualifying event; later '
               'state pushes must not reset it');
       expect(find.textContaining('Unit set to kg'), findsOneWidget);

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
+import '../ble/device_display.dart';
 import '../devices/dumbbell.dart';
 import '../protocol/dumbbell_state.dart';
 import '../state/weights.dart';
@@ -30,7 +31,7 @@ class DumbbellCard extends StatelessWidget {
           builder: (context, stateSnap) {
             final state = stateSnap.data;
             return _Card(
-              name: _displayName(dumbbell.device),
+              name: dumbbell.device.displayName,
               connected: connected,
               state: state,
               unit: unit,
@@ -40,12 +41,6 @@ class DumbbellCard extends StatelessWidget {
       },
     );
   }
-}
-
-String _displayName(BluetoothDevice device) {
-  final adv = device.advName;
-  if (adv.isNotEmpty) return adv;
-  return device.remoteId.str;
 }
 
 class _Card extends StatelessWidget {
