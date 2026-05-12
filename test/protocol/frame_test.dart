@@ -100,8 +100,7 @@ void main() {
       expect(afterD2.unitRaw, 0x01, reason: 'unitRaw must survive a 0xD2');
     });
 
-    test('0xD2 broadcast updates weight index on top of an existing state',
-        () {
+    test('0xD2 broadcast updates weight index on top of an existing state', () {
       // 0xD2 with prior state -> update the weight index, preserve the rest.
       final d2 = parseFrame([
         0xFF, 0x10, 0xD2, 0x00, 0x00, 0x00, 0x00, 0x00, //

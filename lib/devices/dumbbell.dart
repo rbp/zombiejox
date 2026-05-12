@@ -1,8 +1,9 @@
 import 'dart:async';
 
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-
+import '../ble/ble_connection_state.dart';
 import '../ble/ble_service.dart';
+import '../ble/ble_transport.dart';
+import '../ble/device_ref.dart';
 import '../protocol/dumbbell_state.dart';
 import '../protocol/frame.dart';
 import '../protocol/opcodes.dart';
@@ -15,8 +16,8 @@ import '../state/weights.dart' show kJaxJoxWeightCount;
 /// containing screen disposes mid-connect). After `disconnect()`, all public
 /// methods are no-ops and `isReady` is false. Idempotent.
 class Dumbbell {
-  final BleConnection _ble;
-  final BluetoothDevice device;
+  final BleTransport _ble;
+  final DeviceRef device;
 
   final StreamController<DumbbellState> _states =
       StreamController<DumbbellState>.broadcast();
@@ -53,11 +54,19 @@ class Dumbbell {
   /// override it are honoured.
   bool get isReady => !_disposed && lastState != null;
 
-  Stream<BluetoothConnectionState> get connectionState => _ble.connectionState;
+  Stream<BleConnectionState> get connectionState => _ble.connectionState;
 
   StreamSubscription<List<int>>? _rxSub;
 
+  /// Constructs a [Dumbbell] driven by the production [BleConnection].
+  /// Tests that need a transport seam should subclass [Dumbbell] directly
+  /// (see `FakeDumbbell` in `test/devices/weight_group_test.dart`).
   Dumbbell(this.device) : _ble = BleConnection(device);
+
+  /// Test-only escape hatch: inject a pre-built [BleTransport]. Used by
+  /// fakes that drive `Dumbbell` end-to-end through the transport seam
+  /// rather than overriding its public methods.
+  Dumbbell.withTransport(this.device, this._ble);
 
   Future<void> connect() async {
     if (_disposed) return;

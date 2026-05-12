@@ -116,7 +116,7 @@ The original Java field name `weight` is misleading — runtime testing on `DB20
 | 6 | 44 | `FF 05 D6 06 1A` |
 | 7 | 50 | `FF 05 D6 07 25` |
 
-(Lbs values are JaxJox's published weight steps and match observed motion; explicit display readings still TODO.)
+(Lbs values are JaxJox's published weight steps and match observed motion; explicit display readings still TODO. In kg mode the dock shows `3.6 / 6.4 / 9.1 / 11.8 / 14.5 / 17.2 / 20 / 22.7` — index 6 reads as a whole `20`, not the converted `19.9`.)
 
 #### Response semantics
 

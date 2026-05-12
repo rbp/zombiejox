@@ -81,10 +81,9 @@ class Preferences {
   /// auto-navigate straight to ControlScreen. Empty before the first
   /// verified successful connect.
   ///
-  /// We persist plain `remoteId.str` values rather than serialised
-  /// `BluetoothDevice`s because `flutter_blue_plus` can rehydrate a
-  /// device from just the id, and that's the only field that survives
-  /// across runs anyway.
+  /// We persist plain id strings rather than serialised `DeviceRef`s —
+  /// the id is the only field that survives across runs anyway, and any
+  /// BLE adapter can rehydrate a peripheral handle from just the id.
   List<String> get rememberedDeviceIds {
     return _prefs.getStringList(_keyRememberedDeviceIds) ?? const [];
   }

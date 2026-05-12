@@ -1,16 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
-import '../ble/device_display.dart';
+import '../ble/device_ref.dart';
 
-/// Card shown for a [BluetoothDevice] whose `connect()` threw. Visually
-/// matches `DumbbellCard` but with an error-coloured "Failed to connect"
-/// status line and a refresh icon for retrying.
+/// Card shown for a [DeviceRef] whose `connect()` threw. Visually matches
+/// `DumbbellCard` but with an error-coloured "Failed to connect" status line
+/// and a refresh icon for retrying.
 ///
 /// Pure UI: takes the device, the error (rendered as a tooltip on the
 /// icon), and a retry callback. Owning state lives on `ControlScreen`.
 class FailedDeviceCard extends StatelessWidget {
-  final BluetoothDevice device;
+  final DeviceRef device;
   final Object error;
   final VoidCallback onRetry;
 

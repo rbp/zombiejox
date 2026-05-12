@@ -2,18 +2,30 @@ import 'dart:async';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
+import 'ble_connection_state.dart';
+import 'ble_transport.dart';
+import 'device_ref.dart';
 import 'uuids.dart';
 
-/// Thin wrapper over `flutter_blue_plus`. Connects, finds the JaxJox custom
-/// service, and exposes RX notifications + a `writeTx` method.
+/// Production [BleTransport] backed by `flutter_blue_plus`.
 ///
-/// [disconnect] is idempotent and best-effort: callers can invoke it after a
-/// successful [connect], after a failed one, or twice in a row without
+/// This is the only class in the app that directly references
+/// `BluetoothDevice` / `BluetoothCharacteristic` / `BluetoothConnectionState`
+/// — by design. It lives at the edge of `lib/ble/`; everything above the
+/// port boundary (`devices/`, `state/`, `screens/`, `widgets/`) sees only
+/// [BleTransport] and [DeviceRef].
+///
+/// [disconnect] is idempotent and best-effort: callers can invoke it after
+/// a successful [connect], after a failed one, or twice in a row without
 /// special casing. [connect] cleans up after itself if it throws partway
 /// through, so a caller's `try/catch` doesn't need to know what step the
 /// failure happened on.
-class BleConnection {
-  final BluetoothDevice device;
+class BleConnection implements BleTransport {
+  @override
+  final DeviceRef device;
+
+  final BluetoothDevice _bluetoothDevice;
+
   BluetoothCharacteristic? _tx;
   BluetoothCharacteristic? _rx;
   BluetoothCharacteristic? _batteryLevel;
@@ -23,25 +35,31 @@ class BleConnection {
       StreamController.broadcast();
   bool _closed = false;
 
+  @override
   Stream<List<int>> get rxStream => _rxController.stream;
-  Stream<BluetoothConnectionState> get connectionState =>
-      device.connectionState;
 
-  BleConnection(this.device);
+  @override
+  Stream<BleConnectionState> get connectionState =>
+      _bluetoothDevice.connectionState.map(_mapConnectionState);
 
+  BleConnection(this.device)
+      : _bluetoothDevice =
+            BluetoothDevice(remoteId: DeviceIdentifier(device.id));
+
+  @override
   Future<void> connect() async {
     if (_closed) throw StateError('BleConnection is closed');
     try {
       // License.free per the flutter_blue_plus LICENSE: ZombieJox is GPLv3
       // open-source community software for orphaned hardware (see README), not
       // a commercial product. Revisit if distribution model changes.
-      await device.connect(license: License.free, autoConnect: false);
+      await _bluetoothDevice.connect(license: License.free, autoConnect: false);
 
-      final services = await device.discoverServices();
+      final services = await _bluetoothDevice.discoverServices();
       final svc = services.firstWhere(
         (s) => s.uuid.str.toLowerCase() == JaxJoxUuids.service,
-        orElse: () =>
-            throw StateError('JaxJox service not found on ${device.remoteId}'),
+        orElse: () => throw StateError(
+            'JaxJox service not found on ${_bluetoothDevice.remoteId}'),
       );
       _tx = svc.characteristics.firstWhere(
         (c) => c.uuid.str.toLowerCase() == JaxJoxUuids.txCharacteristic,
@@ -72,12 +90,14 @@ class BleConnection {
     }
   }
 
+  @override
   Future<void> writeTx(List<int> bytes) {
     final tx = _tx;
     if (tx == null) throw StateError('BleConnection is not connected');
     return tx.write(bytes, withoutResponse: true);
   }
 
+  @override
   Future<int?> readBatteryLevel() async {
     final c = _batteryLevel;
     if (c == null) return null;
@@ -85,10 +105,7 @@ class BleConnection {
     return v.isEmpty ? null : v.first;
   }
 
-  /// Idempotent + best-effort. Each step is independently guarded so a
-  /// failure in one (e.g. the BLE adapter is in a bad state) still releases
-  /// the rest. Calling [disconnect] twice, or before a successful [connect],
-  /// is fine.
+  @override
   Future<void> disconnect() async {
     if (_closed) return;
     _closed = true;
@@ -100,7 +117,24 @@ class BleConnection {
       if (!_rxController.isClosed) await _rxController.close();
     } catch (_) {/* best-effort */}
     try {
-      await device.disconnect();
+      await _bluetoothDevice.disconnect();
     } catch (_) {/* best-effort */}
+  }
+
+  static BleConnectionState _mapConnectionState(BluetoothConnectionState s) {
+    switch (s) {
+      case BluetoothConnectionState.connected:
+        return BleConnectionState.connected;
+      case BluetoothConnectionState.disconnected:
+        return BleConnectionState.disconnected;
+      // Forward-compat hedge: today `flutter_blue_plus` only emits the two
+      // states above, but older versions also surfaced transient
+      // `connecting` / `disconnecting`. If the plugin ever resurrects them,
+      // collapse both into `connecting` — the UI only cares about "not yet
+      // live" vs "live" vs "cleanly gone", and "in transition" rounds to
+      // "not yet live".
+      default:
+        return BleConnectionState.connecting;
+    }
   }
 }

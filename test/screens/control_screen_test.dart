@@ -1,9 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:zombiejox/ble/ble_connection_state.dart';
+import 'package:zombiejox/ble/device_ref.dart';
 import 'package:zombiejox/devices/dumbbell.dart';
 import 'package:zombiejox/devices/weight_group.dart';
 import 'package:zombiejox/protocol/dumbbell_state.dart';
@@ -18,8 +19,8 @@ class _FakeDumbbell extends Dumbbell {
 
   final StreamController<DumbbellState> _states =
       StreamController<DumbbellState>.broadcast();
-  final StreamController<BluetoothConnectionState> _conn =
-      StreamController<BluetoothConnectionState>.broadcast();
+  final StreamController<BleConnectionState> _conn =
+      StreamController<BleConnectionState>.broadcast();
   DumbbellState? _last;
   final List<int> setWeightCalls = [];
   bool failSetWeight = false;
@@ -29,7 +30,7 @@ class _FakeDumbbell extends Dumbbell {
   Stream<DumbbellState> get states => _states.stream;
 
   @override
-  Stream<BluetoothConnectionState> get connectionState => _conn.stream;
+  Stream<BleConnectionState> get connectionState => _conn.stream;
 
   @override
   DumbbellState? get lastState => _last;
@@ -39,7 +40,7 @@ class _FakeDumbbell extends Dumbbell {
     if (failConnect) {
       throw StateError('fake connect failure');
     }
-    _conn.add(BluetoothConnectionState.connected);
+    _conn.add(BleConnectionState.connected);
   }
 
   @override
@@ -68,8 +69,7 @@ class _FakeDumbbell extends Dumbbell {
   }
 }
 
-BluetoothDevice _device(String id) =>
-    BluetoothDevice(remoteId: DeviceIdentifier(id));
+DeviceRef _device(String id) => DeviceRef(id: id);
 
 Future<Preferences> _freshPrefs() async {
   SharedPreferences.setMockInitialValues({'units': 'lbs'});
@@ -319,9 +319,9 @@ void main() {
       // First attempt for AA:01 succeeds; first attempt for AA:02 fails,
       // second attempt for AA:02 succeeds. The retry test is about whether
       // AA:02 moves above AA:01 when it transitions failed → connected.
-      final isAa01 = d.remoteId.str == 'AA:01';
+      final isAa01 = d.id == 'AA:01';
       final attemptsForThisDevice =
-          fakes.where((f) => f.device.remoteId.str == d.remoteId.str).length;
+          fakes.where((f) => f.device.id == d.id).length;
       final f = _FakeDumbbell(d)
         ..failConnect = !isAa01 && attemptsForThisDevice == 0;
       fakes.add(f);

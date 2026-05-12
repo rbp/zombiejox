@@ -1,8 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zombiejox/ble/ble_connection_state.dart';
+import 'package:zombiejox/ble/device_ref.dart';
 import 'package:zombiejox/devices/dumbbell.dart';
 import 'package:zombiejox/protocol/dumbbell_state.dart';
 import 'package:zombiejox/state/weights.dart';
@@ -17,20 +18,20 @@ class _FakeDumbbell extends Dumbbell {
 
   final StreamController<DumbbellState> _states =
       StreamController<DumbbellState>.broadcast();
-  final StreamController<BluetoothConnectionState> _conn =
-      StreamController<BluetoothConnectionState>.broadcast();
+  final StreamController<BleConnectionState> _conn =
+      StreamController<BleConnectionState>.broadcast();
   DumbbellState? _last;
 
   @override
   Stream<DumbbellState> get states => _states.stream;
 
   @override
-  Stream<BluetoothConnectionState> get connectionState => _conn.stream;
+  Stream<BleConnectionState> get connectionState => _conn.stream;
 
   @override
   DumbbellState? get lastState => _last;
 
-  void emitConnected() => _conn.add(BluetoothConnectionState.connected);
+  void emitConnected() => _conn.add(BleConnectionState.connected);
   void emitState(DumbbellState s) {
     _last = s;
     _states.add(s);
@@ -42,8 +43,8 @@ class _FakeDumbbell extends Dumbbell {
   }
 }
 
-BluetoothDevice _device(String id) =>
-    BluetoothDevice(remoteId: DeviceIdentifier(id));
+DeviceRef _device(String id, {String name = ''}) =>
+    DeviceRef(id: id, name: name);
 
 Future<void> _pump(WidgetTester tester, Widget w) async {
   await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
@@ -120,7 +121,7 @@ void main() {
   });
 
   testWidgets('falls back to remoteId when advName is empty', (tester) async {
-    // The default-constructed BluetoothDevice has empty advName.
+    // DeviceRef with empty name falls back to the id.
     final fake = _FakeDumbbell(_device('AA:BB:CC'));
     addTearDown(fake.dispose);
 
