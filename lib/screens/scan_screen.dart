@@ -312,7 +312,7 @@ class ScanResultsList extends StatelessWidget {
         return CheckboxListTile(
           value: selected.contains(r.device),
           onChanged: (_) => onToggle(r.device),
-          title: Text(r.device.name),
+          title: Text(r.device.displayName),
           subtitle: Text('${r.device.id}  •  RSSI ${r.rssi}'),
         );
       },

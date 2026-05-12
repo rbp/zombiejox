@@ -9,10 +9,11 @@ import 'uuids.dart';
 
 /// Production [BleTransport] backed by `flutter_blue_plus`.
 ///
-/// This is the only class above `lib/ble/` that knows about
+/// This is the only class in the app that directly references
 /// `BluetoothDevice` / `BluetoothCharacteristic` / `BluetoothConnectionState`
-/// — by design. The rest of the app sees only [BleTransport] and
-/// [DeviceRef].
+/// — by design. It lives at the edge of `lib/ble/`; everything above the
+/// port boundary (`devices/`, `state/`, `screens/`, `widgets/`) sees only
+/// [BleTransport] and [DeviceRef].
 ///
 /// [disconnect] is idempotent and best-effort: callers can invoke it after
 /// a successful [connect], after a failed one, or twice in a row without

@@ -4,9 +4,10 @@
 // supports 8 settings (indices 0..7); see `docs/ble_protocol.md` §4.
 //
 // `kWeightLbsByIndex` is the canonical hardware fact (what JaxJox put on
-// the box for the lbs SKU). `kWeightKgByIndex` is the exact lb→kg conversion
-// to one decimal place — the kg SKU's own display rounding has not been
-// independently verified yet (see TODO in `docs/ble_protocol.md` §2g).
+// the box for the lbs SKU). `kWeightKgByIndex` matches what the dock shows
+// in kg mode — mostly the exact lb→kg conversion to one decimal, except
+// index 6, which the dock displays as a whole `20` (not the converted `19.9`).
+// On-device verified.
 
 const List<int> kWeightLbsByIndex = [8, 14, 20, 26, 32, 38, 44, 50];
 
@@ -17,7 +18,7 @@ const List<double> kWeightKgByIndex = [
   11.8,
   14.5,
   17.2,
-  19.9,
+  20,
   22.7,
 ];
 
@@ -39,7 +40,10 @@ enum WeightUnit {
   }
 }
 
-/// Format a weight index for the user (e.g. `"32 lbs"` or `"14.5 kg"`).
+/// Format a weight index for the user (e.g. `"32 lbs"`, `"14.5 kg"`, `"20 kg"`).
+///
+/// Whole-number kg values render without a trailing `.0` to match how the
+/// dock itself displays them (e.g. index 6 in kg is `20`, not `20.0`).
 ///
 /// Returns an empty string if `index` is out of range — callers should not
 /// pass invalid indices, but the UI shouldn't crash if state is malformed.
@@ -49,7 +53,11 @@ String formatWeight(int index, WeightUnit unit) {
     case WeightUnit.lbs:
       return '${kWeightLbsByIndex[index]} lbs';
     case WeightUnit.kg:
-      return '${kWeightKgByIndex[index]} kg';
+      final kg = kWeightKgByIndex[index];
+      final label = kg == kg.truncateToDouble()
+          ? kg.toStringAsFixed(0)
+          : kg.toStringAsFixed(1);
+      return '$label kg';
   }
 }
 
