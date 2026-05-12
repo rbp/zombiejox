@@ -8,7 +8,16 @@ import 'package:zombiejox/state/weights.dart';
 import 'package:zombiejox/widgets/weight_button.dart';
 
 Future<void> _pump(WidgetTester tester, Widget w) async {
-  await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+  // Constrain the tile so InkWell-inside-Material has a finite size to
+  // render into. Mirrors the grid cell shape the production layout
+  // gives us.
+  await tester.pumpWidget(MaterialApp(
+    home: Scaffold(
+      body: Center(
+        child: SizedBox(width: 120, height: 80, child: w),
+      ),
+    ),
+  ));
 }
 
 void main() {
@@ -34,12 +43,12 @@ void main() {
       'selected → Semantics reports selected + a label that calls it out; '
       'unselected → Semantics reports not-selected + the bare label',
       (tester) async {
-    // The previous assertion ("FilledButton vs FilledButton.tonal") didn't
-    // actually distinguish — `FilledButton.tonal` is a factory that
-    // returns a `FilledButton`, so both branches matched `findsOneWidget`.
-    // The user-meaningful distinction is whether the button is announced
-    // as selected by VoiceOver / TalkBack, which is what `Semantics` flags
-    // and what we actually care about.
+    // Selection isn't a button-variant swap any more (PR 1 of the design
+    // redo replaced FilledButton / FilledButton.tonal with a single
+    // rounded tile whose fill comes from the active scheme). The
+    // user-meaningful distinction is whether the tile is announced as
+    // selected by VoiceOver / TalkBack — that's what `Semantics` flags
+    // and what we still assert on.
     await _pump(
       tester,
       const WeightButton(
@@ -76,8 +85,11 @@ void main() {
         onPressed: null,
       ),
     );
-    final button = tester.widget<FilledButton>(find.byType(FilledButton));
-    expect(button.onPressed, isNull);
+    // The tile's InkWell has a null onTap when the parent's onPressed is
+    // null — that's what blocks taps even though the visual tile remains
+    // in place.
+    final ink = tester.widget<InkWell>(find.byType(InkWell));
+    expect(ink.onTap, isNull);
   });
 
   testWidgets('forwards taps to onPressed', (tester) async {
@@ -91,7 +103,39 @@ void main() {
         onPressed: () => taps++,
       ),
     );
-    await tester.tap(find.byType(FilledButton));
+    await tester.tap(find.byType(InkWell));
     expect(taps, 1);
+  });
+
+  testWidgets(
+      'label fits at TextScaler 1.6× without clipping — large-font safety',
+      (tester) async {
+    // FittedBox(scaleDown) inside the tile should shrink the label to
+    // fit the cell at large text scales. We assert the label is still
+    // present and the rendered text isn't laid out past its parent.
+    await tester.pumpWidget(MaterialApp(
+      home: MediaQuery(
+        data: const MediaQueryData(textScaler: TextScaler.linear(1.6)),
+        child: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 100,
+              height: 60,
+              child: WeightButton(
+                index: 4, // "32 lbs" — one of the wider labels
+                unit: WeightUnit.lbs,
+                selected: false,
+                onPressed: () {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    ));
+    expect(find.text('32 lbs'), findsOneWidget);
+    final textBox = tester.getRect(find.text('32 lbs'));
+    final tileBox = tester.getRect(find.byType(WeightButton));
+    expect(textBox.width, lessThanOrEqualTo(tileBox.width));
+    expect(textBox.height, lessThanOrEqualTo(tileBox.height));
   });
 }

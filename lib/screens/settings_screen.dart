@@ -15,24 +15,29 @@ class SettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
-      body: ListView(
-        children: [
-          ValueListenableBuilder<WeightUnit>(
-            valueListenable: preferences.unit,
-            builder: (context, unit, _) => _UnitTile(
-              unit: unit,
-              onChanged: preferences.setUnit,
-            ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: ListView(
+            children: [
+              ValueListenableBuilder<WeightUnit>(
+                valueListenable: preferences.unit,
+                builder: (context, unit, _) => _UnitTile(
+                  unit: unit,
+                  onChanged: preferences.setUnit,
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: const Text('About ZombieJox'),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const AboutScreen()),
+                ),
+              ),
+            ],
           ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.info_outline),
-            title: const Text('About ZombieJox'),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const AboutScreen()),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

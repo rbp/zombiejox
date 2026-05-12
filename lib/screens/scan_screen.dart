@@ -234,7 +234,9 @@ class _ScanScreenState extends State<ScanScreen> {
             stream: _scanner.isScanning,
             initialData: false,
             builder: (context, snap) => IconButton(
-              icon: Icon(snap.data == true ? Icons.stop : Icons.refresh),
+              icon: Icon(
+                snap.data == true ? Icons.stop_circle : Icons.refresh,
+              ),
               onPressed: () async {
                 if (snap.data == true) {
                   await _scanner.stopScan();
@@ -246,40 +248,48 @@ class _ScanScreenState extends State<ScanScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: StreamBuilder<List<ScanHit>>(
-              stream: _scanner.results,
-              initialData: const [],
-              builder: (context, snap) {
-                final results = (snap.data ?? const <ScanHit>[])
-                    .where((r) => _isJaxJox(r.device.name))
-                    .toList();
-                return ScanResultsList(
-                  results: results,
-                  selected: _selected,
-                  onToggle: _toggleSelected,
-                );
-              },
-            ),
-          ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: _selected.isEmpty ? null : _onConnect,
-                  child: Text(_selected.isEmpty
-                      ? 'Connect'
-                      : 'Connect (${_selected.length})'),
+      body: Center(
+        // On phones (typically ≤ 600 dp wide) this is a no-op. On tablets
+        // / landscape the cards would otherwise stretch absurdly wide;
+        // capping at 600 dp keeps the scan list readable.
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: Column(
+            children: [
+              Expanded(
+                child: StreamBuilder<List<ScanHit>>(
+                  stream: _scanner.results,
+                  initialData: const [],
+                  builder: (context, snap) {
+                    final results = (snap.data ?? const <ScanHit>[])
+                        .where((r) => _isJaxJox(r.device.name))
+                        .toList();
+                    return ScanResultsList(
+                      results: results,
+                      selected: _selected,
+                      onToggle: _toggleSelected,
+                    );
+                  },
                 ),
               ),
-            ),
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: _selected.isEmpty ? null : _onConnect,
+                      child: Text(_selected.isEmpty
+                          ? 'Connect'
+                          : 'Connect (${_selected.length})'),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
