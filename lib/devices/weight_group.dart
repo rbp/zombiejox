@@ -1,7 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-
+import '../ble/device_ref.dart';
 import 'dumbbell.dart';
 
 /// A set of [Dumbbell]s driven as a unit. The default user model: one weight
@@ -19,13 +18,13 @@ class WeightGroup {
   final List<Dumbbell> _dumbbells = [];
   final StreamController<List<Dumbbell>> _controller =
       StreamController.broadcast();
-  final Dumbbell Function(BluetoothDevice) _newDumbbell;
+  final Dumbbell Function(DeviceRef) _newDumbbell;
   bool _disposed = false;
 
   /// [newDumbbell] is the factory used by [add] to construct new dumbbells.
   /// Defaults to the real [Dumbbell] implementation; tests pass a factory
   /// that returns a fake.
-  WeightGroup({Dumbbell Function(BluetoothDevice)? newDumbbell})
+  WeightGroup({Dumbbell Function(DeviceRef)? newDumbbell})
       : _newDumbbell = newDumbbell ?? Dumbbell.new;
 
   /// Read-only view of the current members.
@@ -34,7 +33,7 @@ class WeightGroup {
   /// Emits the new member list whenever a dumbbell is added or removed.
   Stream<List<Dumbbell>> get changes => _controller.stream;
 
-  /// Add a [BluetoothDevice] to the group and connect to it. The dumbbell is
+  /// Add a [DeviceRef] to the group and connect to it. The dumbbell is
   /// added to the membership immediately (so the UI can render a "connecting"
   /// card) and removed if [Dumbbell.connect] throws.
   ///
@@ -45,7 +44,7 @@ class WeightGroup {
   /// in-flight member in its snapshot and calls `Dumbbell.disconnect`, which
   /// flips the dumbbell's own `_disposed` flag and tears down BLE on the
   /// next `connect()` await checkpoint. Idempotent.
-  Future<Dumbbell> add(BluetoothDevice device) async {
+  Future<Dumbbell> add(DeviceRef device) async {
     if (_disposed) {
       throw StateError('WeightGroup is disposed');
     }

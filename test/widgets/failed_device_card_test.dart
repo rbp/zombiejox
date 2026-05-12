@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zombiejox/ble/device_ref.dart';
 import 'package:zombiejox/widgets/failed_device_card.dart';
 
-BluetoothDevice _device(String id) =>
-    BluetoothDevice(remoteId: DeviceIdentifier(id));
+DeviceRef _device(String id) => DeviceRef(id: id);
 
 Future<void> _pump(WidgetTester tester, Widget w) async {
   await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));

@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
+import '../ble/device_ref.dart';
 import '../devices/dumbbell.dart';
 import '../devices/weight_group.dart';
 import '../protocol/dumbbell_state.dart';
@@ -20,7 +20,7 @@ import 'settings_screen.dart';
 /// Tests can override [createWeightGroup] to inject a [WeightGroup] with a
 /// fake-dumbbell factory.
 class ControlScreen extends StatefulWidget {
-  final List<BluetoothDevice> devices;
+  final List<DeviceRef> devices;
   final Preferences preferences;
   final WeightGroup Function()? createWeightGroup;
 
@@ -51,7 +51,7 @@ class _ControlScreenState extends State<ControlScreen> {
   // removed when the device joins the group) or fails again (entry
   // replaced). Rendered in-place — the device's slot in the list stays put;
   // only the card *content* swaps between FailedDeviceCard and DumbbellCard.
-  final Map<BluetoothDevice, Object> _failedDevices = {};
+  final Map<DeviceRef, Object> _failedDevices = {};
   StreamSubscription<List<Dumbbell>>? _changesSub;
   // Per-dumbbell state subscriptions. We trigger setState on every emission
   // so derived values like `_allReady` and the consensus weight refresh
@@ -145,7 +145,8 @@ class _ControlScreenState extends State<ControlScreen> {
       case AutoMatchOutcome.matched:
         final label = result.unit == WeightUnit.lbs ? 'lbs' : 'kg';
         messenger.showSnackBar(
-          SnackBar(content: Text('Unit set to $label to match your dumbbells.')),
+          SnackBar(
+              content: Text('Unit set to $label to match your dumbbells.')),
         );
       case AutoMatchOutcome.disagreement:
         messenger.showSnackBar(
@@ -157,7 +158,7 @@ class _ControlScreenState extends State<ControlScreen> {
     }
   }
 
-  Future<void> _addOne(BluetoothDevice device) async {
+  Future<void> _addOne(DeviceRef device) async {
     // We deliberately don't pre-clear an existing _failedDevices entry: the
     // dumbbell is added to _group synchronously inside _group.add() before
     // the first await, so by the next build dumbbellByDevice already has it
@@ -262,12 +263,12 @@ class _Body extends StatelessWidget {
   // order regardless of connection state, so a failed card retrying — which
   // briefly removes it from `failedDevices` and adds it to `dumbbells` —
   // doesn't visually move it past its neighbours.
-  final List<BluetoothDevice> orderedDevices;
+  final List<DeviceRef> orderedDevices;
   final List<Dumbbell> dumbbells;
   final WeightUnit unit;
-  final Map<BluetoothDevice, Object> failedDevices;
+  final Map<DeviceRef, Object> failedDevices;
   final Future<void> Function(int) onSelectIndex;
-  final Future<void> Function(BluetoothDevice) onRetry;
+  final Future<void> Function(DeviceRef) onRetry;
 
   const _Body({
     required this.orderedDevices,
@@ -312,13 +313,13 @@ class _Body extends StatelessWidget {
   /// failed transitions as a real swap (and cross-fade them) instead of a
   /// no-op rebuild of the same widget.
   Widget _cardFor(
-    BluetoothDevice device,
-    Map<BluetoothDevice, Dumbbell> dumbbellByDevice,
+    DeviceRef device,
+    Map<DeviceRef, Dumbbell> dumbbellByDevice,
   ) {
     final dumbbell = dumbbellByDevice[device];
     if (dumbbell != null) {
       return DumbbellCard(
-        key: ValueKey('connected-${device.remoteId.str}'),
+        key: ValueKey('connected-${device.id}'),
         dumbbell: dumbbell,
         unit: unit,
       );
@@ -326,7 +327,7 @@ class _Body extends StatelessWidget {
     final error = failedDevices[device];
     if (error != null) {
       return FailedDeviceCard(
-        key: ValueKey('failed-${device.remoteId.str}'),
+        key: ValueKey('failed-${device.id}'),
         device: device,
         error: error,
         onRetry: () => onRetry(device),
@@ -338,7 +339,7 @@ class _Body extends StatelessWidget {
     // from the group). Kept as a defensive zero-height fallback — a visible
     // placeholder here would itself be the bug.
     return SizedBox.shrink(
-      key: ValueKey('pending-${device.remoteId.str}'),
+      key: ValueKey('pending-${device.id}'),
     );
   }
 

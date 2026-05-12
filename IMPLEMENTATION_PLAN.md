@@ -60,6 +60,7 @@ PRs merged against `main`:
 - **PR #7** (`00b349d`) — warm-start auto-reconnect to remembered dumbbells (skip the scan step when we already know what worked last time).
 - **PR #8** (`d3d2a8c`) — custom zombie launcher icon + splash for both Android (legacy + adaptive) and iOS.
 - **PR #10** (`a2fa089`) — `0xD1` byte-8 dock-unit parsing + auto-match the app's display unit to the connected dumbbells' on first connect.
+- **PR #14** (`refactor/ble-port`) — bind `flutter_blue_plus` behind a port/adapter (`DeviceRef`, `BleConnectionState`, `BleTransport`, `BleScanner`). The plugin's `BluetoothDevice` / `BluetoothConnectionState` / `DeviceIdentifier` / `ScanResult` types no longer appear above `lib/ble/`. Closes off the top item on PR #12's review list and makes a future plugin swap a one-file change.
 
 The app's current user flow: rationale on first launch → grant → scan (skipped on warm start if remembered devices exist) → tick dumbbells → **Connect (N)** → control screen with N cards + a single weight grid + Settings/About reachable from any screen. Toggling kg/lbs in Settings re-labels everything live. On first connect, if the user hasn't picked a unit yet, the app silently matches whatever the docks are set to (or surfaces a SnackBar if they disagree).
 
@@ -109,7 +110,11 @@ lib/
     dumbbell_state.dart             ✅
   ble/
     uuids.dart                      ✅
-    ble_service.dart                ✅
+    device_ref.dart                 ✅   plugin-agnostic peripheral handle (id + name + displayName fallback)
+    ble_connection_state.dart       ✅   3-state enum replacing the plugin's BluetoothConnectionState
+    ble_transport.dart              ✅   per-device transport interface (the protocol-side seam)
+    ble_scanner.dart                ✅   scan interface + ScanHit value type + FlutterBluePlusScanner adapter
+    ble_service.dart                ✅   BleConnection — production BleTransport adapter backed by flutter_blue_plus
   devices/
     dumbbell.dart                   ✅
     weight_group.dart               ✅   N-device fan-out
@@ -136,7 +141,7 @@ android/app/src/main/AndroidManifest.xml   ✅
 ios/Runner/Info.plist                       ✅
 ```
 
-Total test count: **108 tests, all passing.** `flutter analyze` clean. `dart format` clean.
+Total test count: **118 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
 
 ### 1e. Platform setup — ✅ done
 
@@ -290,6 +295,7 @@ The small "stop" / "retry" button on top-right of the scan screen is confusing -
 | APK is heavily obfuscated | **Mostly resolved** — JADX decompiled with 45 minor errors; the protocol surface (BLE callbacks, packet builder, opcodes) decompiled cleanly. |
 | Firmware requires specific app signature/certificate | **Unlikely** — X8IQ's iOS app works without the cloud; user confirmed in 0a. |
 | N dumbbells need simultaneous control | **Designed in** — `WeightGroup` abstraction fans out a single `setWeightIndex` to all connected devices in parallel. `flutter_blue_plus` supports concurrent connections. |
+| BLE plugin lock-in (breaking changes on upgrade, no path to a second transport) | **Mitigated by PR #14** — `flutter_blue_plus` is now confined to `lib/ble/` behind `BleTransport` + `BleScanner`. A plugin swap (or a parallel transport for wear OS / web BLE) is a single-file change, not a codebase-wide refactor. |
 
 ---
 
@@ -311,7 +317,7 @@ The small "stop" / "retry" button on top-right of the scan screen is confusing -
 
 - ✅ **Protocol correctness** — `0xD6 <idx>` sent from nRF Connect physically moves the dumbbell across all 8 indices on `DB200-0161997`.
 - ✅ **Protocol unit tests** — `test/protocol/checksum_test.dart` and `test/protocol/frame_test.dart` exercise the checksum algorithm and the frame builder/parser round-trip.
-- ✅ **State + group + widget + screen unit tests** — 108 tests total covering `state/{weights,preferences}`, `devices/weight_group`, `widgets/{weight_button,dumbbell_card,failed_device_card}`, `screens/{control,scan,permission,settings,about}_screen`. Includes the auto-match-from-dock debounce + decision logic and the `0xD1` byte-8 parse. `flutter analyze` clean.
+- ✅ **State + group + widget + screen unit tests** — 118 tests total covering `state/{weights,preferences,unit_auto_matcher}`, `devices/{dumbbell,weight_group}`, `widgets/{weight_button,dumbbell_card,failed_device_card}`, `screens/{control,scan,permission,settings,about}_screen`. Includes the auto-match-from-dock debounce + decision logic and the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
 - ✅ **Multi-device fan-out (architectural)** — `WeightGroup.setWeightIndex` fan-out covered by unit tests against a fake-Dumbbell.
 
 ### Pending — needs on-device verification (Android + iOS)

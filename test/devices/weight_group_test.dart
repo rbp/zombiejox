@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zombiejox/ble/device_ref.dart';
 import 'package:zombiejox/devices/dumbbell.dart';
 import 'package:zombiejox/devices/weight_group.dart';
 
@@ -74,8 +74,7 @@ class FakeDumbbell extends Dumbbell {
   }
 }
 
-BluetoothDevice _device(String id) =>
-    BluetoothDevice(remoteId: DeviceIdentifier(id));
+DeviceRef _device(String id) => DeviceRef(id: id);
 
 void main() {
   group('add()', () {

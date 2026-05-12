@@ -61,7 +61,6 @@ void main() {
 
       prefs.unit.removeListener(listener);
     });
-
   });
 
   group('rememberedDeviceIds', () {
