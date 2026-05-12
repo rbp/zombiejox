@@ -34,9 +34,11 @@ enum PermissionFlowState {
 /// - [PermissionFlowState.denied] → [PermissionFlowState.rationale] on
 ///   [tryAgain]. [tryAgain] is a no-op from any other state.
 ///
-/// **Re-entrancy:** [requestPermissions] is a no-op while already in
-/// [PermissionFlowState.requesting], so a double-tap can't double-prompt
-/// the OS.
+/// **Strict state machine.** [requestPermissions] is a no-op from any
+/// state other than [PermissionFlowState.rationale] — that covers the
+/// re-entrant double-tap (already in [PermissionFlowState.requesting])
+/// and forces a [tryAgain] step between a denied attempt and the next
+/// request rather than allowing a silent `denied → requesting` bypass.
 ///
 /// **Errors:** a thrown exception from `request` (e.g. a
 /// `MissingPluginException` from `permission_handler`) is swallowed and
@@ -58,12 +60,13 @@ class PermissionRequestFlow {
   /// Returns `true` iff the prompt was granted — caller is expected to
   /// navigate away; this flow does not transition out of `requesting` on
   /// success because the screen will be torn down. Returns `false` on
-  /// denial, on platform exception, on a re-entrant call while a prior
-  /// request is still in flight, and on any resolution that lands after
-  /// [dispose].
+  /// denial, on platform exception, on a call from any state other than
+  /// [PermissionFlowState.rationale] (re-entrant during `requesting`, or
+  /// from `denied` without a [tryAgain] first), and on any resolution
+  /// that lands after [dispose].
   Future<bool> requestPermissions() async {
     if (_disposed) return false;
-    if (_state.value == PermissionFlowState.requesting) return false;
+    if (_state.value != PermissionFlowState.rationale) return false;
     _state.value = PermissionFlowState.requesting;
 
     bool granted;

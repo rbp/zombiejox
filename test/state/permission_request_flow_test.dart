@@ -78,6 +78,29 @@ void main() {
       expect(await first, isTrue);
     });
 
+    test(
+        'requestPermissions from denied is a no-op — caller must call '
+        'tryAgain first. The documented state machine has no direct '
+        'denied → requesting edge', () async {
+      var attempts = 0;
+      final flow = PermissionRequestFlow(request: () async {
+        attempts++;
+        return false;
+      });
+      addTearDown(flow.dispose);
+
+      await flow.requestPermissions();
+      expect(flow.state.value, PermissionFlowState.denied);
+      expect(attempts, 1);
+
+      // Second call without tryAgain — must not re-prompt, state unchanged.
+      final ok = await flow.requestPermissions();
+      expect(ok, isFalse);
+      expect(flow.state.value, PermissionFlowState.denied);
+      expect(attempts, 1,
+          reason: 'request callback must not have been invoked');
+    });
+
     test('tryAgain returns from denied to rationale', () async {
       final flow = PermissionRequestFlow(request: () async => false);
       addTearDown(flow.dispose);
