@@ -4,12 +4,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zombiejox/ble/device_ref.dart';
 import 'package:zombiejox/devices/dumbbell.dart';
 import 'package:zombiejox/devices/weight_group.dart';
+import 'package:zombiejox/protocol/dumbbell_state.dart';
 
 /// Test double for [Dumbbell] that records calls and never touches BLE.
 ///
 /// `Dumbbell`'s constructor wires up a `BleConnection` for `device` but does
 /// no I/O at construction; overriding the public methods keeps all tests
-/// hermetic.
+/// hermetic. State emissions are routed through a private broadcast
+/// controller so we can drive the `WeightGroup`'s per-member listener.
 class FakeDumbbell extends Dumbbell {
   FakeDumbbell(super.device, {this.startsReady = true});
 
@@ -17,6 +19,10 @@ class FakeDumbbell extends Dumbbell {
   /// case in tests). Set false to simulate a still-connecting dumbbell.
   final bool startsReady;
   bool _ready = false;
+
+  final StreamController<DumbbellState> _states =
+      StreamController<DumbbellState>.broadcast();
+  DumbbellState? _last;
 
   bool connectCalled = false;
   bool failConnect = false;
@@ -32,11 +38,29 @@ class FakeDumbbell extends Dumbbell {
 
   bool disconnectCalled = false;
 
-  /// Mirror the real `Dumbbell.isReady` semantics: false after disconnect.
+  /// Mirror the real `Dumbbell.isReady` semantics: false after disconnect,
+  /// reflects the state-arrival heuristic otherwise.
   @override
   bool get isReady => !disconnectCalled && _ready;
 
-  /// Simulate the dumbbell becoming ready (state has arrived).
+  @override
+  Stream<DumbbellState> get states => _states.stream;
+
+  @override
+  DumbbellState? get lastState => _last;
+
+  /// Push a state through the broadcast controller, updating [lastState]
+  /// first so consumers reading `lastState` from a snapshot see the new
+  /// value. Also flips [_ready] so [isReady] tracks reality.
+  void emitState(DumbbellState s) {
+    _last = s;
+    _ready = true;
+    _states.add(s);
+  }
+
+  /// Simulate the dumbbell becoming ready without emitting a state
+  /// frame — only useful for the disconnect-mid-add race; the production
+  /// `Dumbbell` becomes ready via emitState().
   void becomeReady() {
     _ready = true;
   }
@@ -71,6 +95,7 @@ class FakeDumbbell extends Dumbbell {
   @override
   Future<void> disconnect() async {
     disconnectCalled = true;
+    if (!_states.isClosed) await _states.close();
   }
 }
 
@@ -78,7 +103,7 @@ DeviceRef _device(String id) => DeviceRef(id: id);
 
 void main() {
   group('add()', () {
-    test('appends, returns the new dumbbell, calls connect()', () async {
+    test('appends to snapshot.connected and calls connect()', () async {
       final fakes = <FakeDumbbell>[];
       final group = WeightGroup(newDumbbell: (d) {
         final f = FakeDumbbell(d);
@@ -86,63 +111,283 @@ void main() {
         return f;
       });
 
-      final db = await group.add(_device('AA:01'));
+      await group.add(_device('AA:01'));
 
-      expect(group.dumbbells, hasLength(1));
-      expect(group.dumbbells.single, same(db));
+      expect(group.lastSnapshot.connected, hasLength(1));
+      expect(group.lastSnapshot.connected.single, same(fakes.single));
+      expect(group.lastSnapshot.failed, isEmpty);
       expect(fakes.single.connectCalled, isTrue);
     });
 
-    test('emits the new membership on the changes stream', () async {
+    test('emits a snapshot for each new member on the snapshots stream',
+        () async {
       final group = WeightGroup(newDumbbell: (d) => FakeDumbbell(d));
-      final emissions = <int>[];
-      final sub = group.changes.listen((list) => emissions.add(list.length));
+      final connectedLengths = <int>[];
+      final sub = group.snapshots
+          .listen((s) => connectedLengths.add(s.connected.length));
 
       await group.add(_device('AA:01'));
       await group.add(_device('AA:02'));
       await pumpEventQueue();
 
-      expect(emissions, [1, 2]);
+      // Two adds → at least one snapshot per add (with .connected
+      // growing); the failed map stays empty throughout.
+      expect(connectedLengths, containsAllInOrder([1, 2]));
       await sub.cancel();
     });
 
-    test('removes the dumbbell from membership and rethrows when connect fails',
-        () async {
+    test(
+        'connect failure moves the device from connected to failed '
+        '— without throwing out of add()', () async {
+      final fakes = <FakeDumbbell>[];
       final group = WeightGroup(newDumbbell: (d) {
-        final f = FakeDumbbell(d);
-        f.failConnect = true;
+        final f = FakeDumbbell(d)..failConnect = true;
+        fakes.add(f);
         return f;
       });
 
-      await expectLater(
-        group.add(_device('AA:01')),
-        throwsA(isA<StateError>()),
-      );
-      expect(group.dumbbells, isEmpty);
+      // No throw — failure surfaces in the snapshot, not the future.
+      await expectLater(group.add(_device('AA:01')), completes);
+
+      expect(group.lastSnapshot.connected, isEmpty);
+      expect(group.lastSnapshot.failed, hasLength(1));
+      expect(group.lastSnapshot.failed[_device('AA:01')], isA<StateError>());
+      // Best-effort cleanup ran: the would-be member was disconnect()ed.
+      expect(fakes.single.disconnectCalled, isTrue);
     });
 
-    test('failed-add still emits an interim "connecting" membership', () async {
-      final emissions = <int>[];
+    test(
+        'failed-add emits two snapshots — interim "connecting" then the '
+        'failure with the device in `failed`', () async {
+      final transitions = <(int, int)>[]; // (connected.length, failed.length)
       final group = WeightGroup(newDumbbell: (d) {
-        final f = FakeDumbbell(d);
-        f.failConnect = true;
-        return f;
+        return FakeDumbbell(d)..failConnect = true;
       });
-      final sub = group.changes.listen((list) => emissions.add(list.length));
+      final sub = group.snapshots.listen(
+          (s) => transitions.add((s.connected.length, s.failed.length)));
 
-      try {
-        await group.add(_device('AA:01'));
-      } catch (_) {/* expected */}
+      await group.add(_device('AA:01'));
       await pumpEventQueue();
 
-      // First the device appears (length 1), then it's removed (length 0).
-      expect(emissions, [1, 0]);
+      // Member appears as connecting (1, 0), then moves to failed (0, 1).
+      expect(transitions, [(1, 0), (0, 1)]);
+      await sub.cancel();
+    });
+
+    test(
+        'retry after failure drops the stale failed entry atomically with '
+        'the new dumbbell appearing in connected', () async {
+      var attempts = 0;
+      final group = WeightGroup(newDumbbell: (d) {
+        attempts++;
+        // First attempt fails; second succeeds.
+        return FakeDumbbell(d)..failConnect = (attempts == 1);
+      });
+
+      await group.add(_device('AA:01'));
+      // Sanity: now in failed, not connected.
+      expect(group.lastSnapshot.connected, isEmpty);
+      expect(group.lastSnapshot.failed, hasLength(1));
+
+      // Retry succeeds.
+      await group.add(_device('AA:01'));
+      expect(group.lastSnapshot.connected, hasLength(1));
+      expect(group.lastSnapshot.failed, isEmpty,
+          reason: 'stale failed entry must be cleared on retry success');
+    });
+
+    test('retry after failure that also fails replaces the failed entry',
+        () async {
+      final errors = [
+        StateError('first failure'),
+        StateError('second failure'),
+      ];
+      var attempts = 0;
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d)
+          ..failConnect = true
+          ..connectError = errors[attempts];
+        attempts++;
+        return f;
+      });
+
+      await group.add(_device('AA:01'));
+      expect(group.lastSnapshot.failed[_device('AA:01')], same(errors[0]));
+
+      await group.add(_device('AA:01'));
+      expect(group.lastSnapshot.failed[_device('AA:01')], same(errors[1]),
+          reason: 'second failure must replace the first');
+    });
+  });
+
+  group('snapshot field derivations', () {
+    test('consensusIndex is null with no ready members', () async {
+      final group =
+          WeightGroup(newDumbbell: (d) => FakeDumbbell(d, startsReady: false));
+      await group.add(_device('AA:01'));
+      expect(group.lastSnapshot.consensusIndex, isNull);
+      expect(group.lastSnapshot.anyReady, isFalse);
+      expect(group.lastSnapshot.anyMoving, isFalse);
+    });
+
+    test('all members agree → consensusIndex = the agreed weight', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      await group.add(_device('AA:02'));
+      for (final f in fakes) {
+        f.emitState(const DumbbellState(
+            weightIndex: 3, motorActive: false, batteryPct: 80));
+      }
+      await pumpEventQueue();
+
+      expect(group.lastSnapshot.consensusIndex, 3);
+      expect(group.lastSnapshot.anyReady, isTrue);
+      expect(group.lastSnapshot.anyMoving, isFalse);
+    });
+
+    test('members disagree → consensusIndex is null', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      await group.add(_device('AA:02'));
+      fakes[0].emitState(const DumbbellState(
+          weightIndex: 1, motorActive: false, batteryPct: 80));
+      fakes[1].emitState(const DumbbellState(
+          weightIndex: 2, motorActive: false, batteryPct: 80));
+      await pumpEventQueue();
+
+      expect(group.lastSnapshot.consensusIndex, isNull,
+          reason: 'one disagreement breaks consensus');
+    });
+
+    test('anyMoving reflects motor activity across any ready member', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      await group.add(_device('AA:02'));
+      fakes[0].emitState(const DumbbellState(
+          weightIndex: 1, motorActive: false, batteryPct: 80));
+      fakes[1].emitState(const DumbbellState(
+          weightIndex: 1, motorActive: true, batteryPct: 80));
+      await pumpEventQueue();
+
+      expect(group.lastSnapshot.anyMoving, isTrue);
+    });
+
+    test('knownUnits aggregates unitRaw across ready members', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      await group.add(_device('AA:02'));
+      await group.add(_device('AA:03'));
+      fakes[0].emitState(const DumbbellState(
+          weightIndex: 0, motorActive: false, batteryPct: 80, unitRaw: 0x00));
+      fakes[1].emitState(const DumbbellState(
+          weightIndex: 0, motorActive: false, batteryPct: 80, unitRaw: 0x00));
+      fakes[2].emitState(const DumbbellState(
+          weightIndex: 0, motorActive: false, batteryPct: 80, unitRaw: 0x01));
+      await pumpEventQueue();
+
+      // Two reported lbs (0x00), one reported kg (0x01) — set has both,
+      // count is 3.
+      expect(group.lastSnapshot.knownUnits, hasLength(2));
+      expect(group.lastSnapshot.knownUnitCount, 3);
+    });
+
+    test('unknown unitRaw is excluded from knownUnits', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      // 0x42 is not a known unit byte.
+      fakes.single.emitState(const DumbbellState(
+          weightIndex: 0, motorActive: false, batteryPct: 80, unitRaw: 0x42));
+      await pumpEventQueue();
+
+      expect(group.lastSnapshot.knownUnits, isEmpty);
+      expect(group.lastSnapshot.knownUnitCount, 0,
+          reason: 'do not guess — unknown bytes must not contribute');
+    });
+  });
+
+  group('snapshot stream timing', () {
+    test('every state arrival emits a snapshot', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+      final emissions = <int?>[];
+      final sub =
+          group.snapshots.listen((s) => emissions.add(s.consensusIndex));
+
+      await group.add(_device('AA:01'));
+      fakes.single.emitState(const DumbbellState(
+          weightIndex: 4, motorActive: false, batteryPct: 80));
+      // Let the snapshot stream propagate before the next state — real
+      // dumbbells emit at ~1 Hz, not back-to-back synchronously. Without
+      // this drain, the listener for state #1 fires after `_last` has
+      // already advanced to state #2 (the fake updates `_last`
+      // synchronously inside emitState), so both snapshots compute
+      // consensusIndex from the latest value.
+      await pumpEventQueue();
+      fakes.single.emitState(const DumbbellState(
+          weightIndex: 5, motorActive: false, batteryPct: 80));
+      await pumpEventQueue();
+
+      // Membership add (null), index=4 arrival (4), index=5 arrival (5).
+      expect(emissions, [null, 4, 5]);
+      await sub.cancel();
+    });
+
+    test('a duplicate state push does NOT re-emit (1 Hz 0xD2 dedupe)',
+        () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+      var emissionCount = 0;
+      final sub = group.snapshots.listen((_) => emissionCount++);
+
+      await group.add(_device('AA:01')); // emit #1
+      const same =
+          DumbbellState(weightIndex: 4, motorActive: false, batteryPct: 80);
+      fakes.single.emitState(same); // emit #2
+      fakes.single.emitState(same); // deduped — no emit
+      fakes.single.emitState(same); // deduped — no emit
+      await pumpEventQueue();
+
+      expect(emissionCount, 2,
+          reason: 'identical consecutive states must not churn the stream');
       await sub.cancel();
     });
   });
 
   group('setWeightIndex()', () {
-    test('fans out to every member in parallel', () async {
+    test('fans out to every ready member in parallel', () async {
       final fakes = <FakeDumbbell>[];
       final group = WeightGroup(newDumbbell: (d) {
         final f = FakeDumbbell(d);
@@ -232,7 +477,7 @@ void main() {
   });
 
   group('disconnectAll()', () {
-    test('disconnects every member and clears membership', () async {
+    test('disconnects every member and clears all bookkeeping', () async {
       final fakes = <FakeDumbbell>[];
       final group = WeightGroup(newDumbbell: (d) {
         final f = FakeDumbbell(d);
@@ -244,27 +489,40 @@ void main() {
 
       await group.disconnectAll();
 
-      expect(group.dumbbells, isEmpty);
+      expect(group.lastSnapshot.connected, isEmpty);
+      expect(group.lastSnapshot.failed, isEmpty);
       for (final f in fakes) {
         expect(f.disconnectCalled, isTrue);
       }
     });
 
-    test('emits an empty membership before closing the changes stream',
-        () async {
-      final emissions = <int>[];
+    test('emits an empty snapshot before closing the stream', () async {
+      final connectedLengths = <int>[];
+      var done = false;
       final group = WeightGroup(newDumbbell: (d) => FakeDumbbell(d));
-      group.changes.listen(
-        (list) => emissions.add(list.length),
-        onDone: () => emissions.add(-1),
+      group.snapshots.listen(
+        (s) => connectedLengths.add(s.connected.length),
+        onDone: () => done = true,
       );
       await group.add(_device('AA:01'));
 
       await group.disconnectAll();
       await pumpEventQueue();
 
-      // 1 add → 1 emission; disconnectAll → emission of 0; then onDone (-1).
-      expect(emissions, [1, 0, -1]);
+      // 1 add → length 1; disconnectAll → length 0; then onDone fires.
+      expect(connectedLengths, [1, 0]);
+      expect(done, isTrue);
+    });
+
+    test('also clears `failed` entries on teardown', () async {
+      final group =
+          WeightGroup(newDumbbell: (d) => FakeDumbbell(d)..failConnect = true);
+      await group.add(_device('AA:01'));
+      expect(group.lastSnapshot.failed, hasLength(1));
+
+      await group.disconnectAll();
+      expect(group.lastSnapshot.failed, isEmpty,
+          reason: 'teardown must not leave stale failed entries behind');
     });
 
     test('is idempotent', () async {
@@ -290,10 +548,10 @@ void main() {
       });
 
       // Start an add() but don't await — yields the loop so the dumbbell
-      // gets pushed into the membership list before we tear down.
+      // gets pushed into the connected list before we tear down.
       final addFuture = group.add(_device('AA:01'));
       await pumpEventQueue();
-      expect(group.dumbbells, hasLength(1));
+      expect(group.lastSnapshot.connected, hasLength(1));
 
       // Tear down while connect is still pending. disconnectAll's snapshot
       // captures the in-flight dumbbell and calls Dumbbell.disconnect on
@@ -307,8 +565,9 @@ void main() {
       await addFuture; // resolves successfully — the dumbbell handled itself
       await disconnectFuture;
 
-      // No orphan: membership cleared, dumbbell disconnected.
-      expect(group.dumbbells, isEmpty);
+      // No orphan: connected cleared, dumbbell disconnected.
+      expect(group.lastSnapshot.connected, isEmpty);
+      expect(group.lastSnapshot.failed, isEmpty);
       expect(fakes.single.disconnectCalled, isTrue);
     });
   });
