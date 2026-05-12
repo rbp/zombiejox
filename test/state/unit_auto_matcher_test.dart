@@ -211,8 +211,7 @@ void main() {
       expect(outcomes, hasLength(1));
     });
 
-    test('dispose cancels the pending debounce — no late outcome',
-        () async {
+    test('dispose cancels the pending debounce — no late outcome', () async {
       final prefs = await _prefs(unit: 'lbs');
       final outcomes = <AutoMatchResult>[];
       final m = UnitAutoMatcher(

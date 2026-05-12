@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
-import '../ble/device_display.dart';
+import '../ble/ble_connection_state.dart';
 import '../devices/dumbbell.dart';
 import '../protocol/dumbbell_state.dart';
 import '../state/weights.dart';
@@ -21,10 +20,10 @@ class DumbbellCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<BluetoothConnectionState>(
+    return StreamBuilder<BleConnectionState>(
       stream: dumbbell.connectionState,
       builder: (context, connSnap) {
-        final connected = connSnap.data == BluetoothConnectionState.connected;
+        final connected = connSnap.data == BleConnectionState.connected;
         return StreamBuilder<DumbbellState>(
           stream: dumbbell.states,
           initialData: dumbbell.lastState,

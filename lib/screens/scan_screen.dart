@@ -1,9 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../ble/ble_scanner.dart';
+import '../ble/device_ref.dart';
 import '../ble/uuids.dart';
 import '../state/preferences.dart';
 import 'control_screen.dart';
@@ -23,14 +24,20 @@ class ScanScreen extends StatefulWidget {
   /// widget tests so we don't actually pump a real ControlScreen (whose
   /// `initState` would hit BLE platform channels). In production this is
   /// null and the screen pushes a [ControlScreen].
-  final Widget Function(BuildContext context, List<BluetoothDevice> devices,
+  final Widget Function(BuildContext context, List<DeviceRef> devices,
       VoidCallback onAnyConnected)? controlScreenBuilder;
+
+  /// Override the BLE scan source — tests pass a fake to avoid touching
+  /// the `flutter_blue_plus` static API. Production uses
+  /// [FlutterBluePlusScanner].
+  final BleScanner? scanner;
 
   const ScanScreen({
     super.key,
     required this.preferences,
     this.checkPermissionsGranted,
     this.controlScreenBuilder,
+    this.scanner,
   });
 
   @override
@@ -38,12 +45,14 @@ class ScanScreen extends StatefulWidget {
 }
 
 class _ScanScreenState extends State<ScanScreen> {
+  late final BleScanner _scanner =
+      widget.scanner ?? const FlutterBluePlusScanner();
   bool _checking = true;
   // Sticky: once we've decided whether to auto-connect on cold start, we
   // don't redo it when the user pops back from ControlScreen (e.g. via
   // Disconnect-all). They probably want to pick different dumbbells.
   bool _autoConnectAttempted = false;
-  final Set<BluetoothDevice> _selected = <BluetoothDevice>{};
+  final Set<DeviceRef> _selected = <DeviceRef>{};
 
   @override
   void initState() {
@@ -87,7 +96,7 @@ class _ScanScreenState extends State<ScanScreen> {
       final ids = widget.preferences.rememberedDeviceIds;
       if (ids.isNotEmpty) {
         await _navigateToControl([
-          for (final id in ids) BluetoothDevice(remoteId: DeviceIdentifier(id)),
+          for (final id in ids) DeviceRef(id: id),
         ]);
         return;
       }
@@ -103,14 +112,14 @@ class _ScanScreenState extends State<ScanScreen> {
     // odd state, platform channel error). Swallow + log; the user has a
     // refresh icon they can hit once the underlying issue is fixed.
     try {
-      if (FlutterBluePlus.isScanningNow) {
-        await FlutterBluePlus.stopScan();
+      if (_scanner.isScanningNow) {
+        await _scanner.stopScan();
       }
       // The native filter (`withKeywords`) is an efficiency hint — it
       // cuts BLE advertisement churn. The *authoritative* filter is
       // `_isJaxJox` applied to the stream results below, which also
       // rejects DFU-mode names ending in `U`.
-      await FlutterBluePlus.startScan(
+      await _scanner.startScan(
         withKeywords: kJaxJoxNamePrefixes,
         timeout: const Duration(seconds: 30),
       );
@@ -119,7 +128,7 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
-  void _toggleSelected(BluetoothDevice device) {
+  void _toggleSelected(DeviceRef device) {
     setState(() {
       if (_selected.contains(device)) {
         _selected.remove(device);
@@ -134,7 +143,7 @@ class _ScanScreenState extends State<ScanScreen> {
     final devices = _selected.toList();
     // Same as _startScan — don't let an adapter-state error stall us.
     try {
-      await FlutterBluePlus.stopScan();
+      await _scanner.stopScan();
     } catch (e, st) {
       debugPrint('stopScan failed pre-navigate: $e\n$st');
     }
@@ -149,11 +158,11 @@ class _ScanScreenState extends State<ScanScreen> {
   /// all out of range) never poisons the warm-start fast path. Shared
   /// between the manual "Connect (N)" tap and the auto-connect-on-cold-
   /// start path.
-  Future<void> _navigateToControl(List<BluetoothDevice> devices) async {
+  Future<void> _navigateToControl(List<DeviceRef> devices) async {
     if (!mounted) return;
     void rememberOnConnect() => unawaited(
           widget.preferences.setRememberedDeviceIds(
-            [for (final d in devices) d.remoteId.str],
+            [for (final d in devices) d.id],
           ),
         );
     await Navigator.of(context).push(
@@ -187,8 +196,8 @@ class _ScanScreenState extends State<ScanScreen> {
     // would be a useless crash since we're tearing down anyway. Both the
     // synchronous getter and the async future are guarded.
     try {
-      if (FlutterBluePlus.isScanningNow) {
-        unawaited(FlutterBluePlus.stopScan().catchError((_) {}));
+      if (_scanner.isScanningNow) {
+        unawaited(_scanner.stopScan().catchError((_) {}));
       }
     } catch (_) {}
     super.dispose();
@@ -222,13 +231,13 @@ class _ScanScreenState extends State<ScanScreen> {
             ),
           ),
           StreamBuilder<bool>(
-            stream: FlutterBluePlus.isScanning,
+            stream: _scanner.isScanning,
             initialData: false,
             builder: (context, snap) => IconButton(
               icon: Icon(snap.data == true ? Icons.stop : Icons.refresh),
               onPressed: () async {
                 if (snap.data == true) {
-                  await FlutterBluePlus.stopScan();
+                  await _scanner.stopScan();
                 } else {
                   await _startScan();
                 }
@@ -240,12 +249,12 @@ class _ScanScreenState extends State<ScanScreen> {
       body: Column(
         children: [
           Expanded(
-            child: StreamBuilder<List<ScanResult>>(
-              stream: FlutterBluePlus.scanResults,
+            child: StreamBuilder<List<ScanHit>>(
+              stream: _scanner.results,
               initialData: const [],
               builder: (context, snap) {
-                final results = (snap.data ?? const <ScanResult>[])
-                    .where((r) => _isJaxJox(r.advertisementData.advName))
+                final results = (snap.data ?? const <ScanHit>[])
+                    .where((r) => _isJaxJox(r.device.name))
                     .toList();
                 return ScanResultsList(
                   results: results,
@@ -277,12 +286,12 @@ class _ScanScreenState extends State<ScanScreen> {
 }
 
 /// Renders the live list of scan results with a checkbox per row. Pure UI:
-/// owns no state, doesn't talk to FlutterBluePlus, and is what tests pump.
+/// owns no state, doesn't talk to any BLE plugin, and is what tests pump.
 @visibleForTesting
 class ScanResultsList extends StatelessWidget {
-  final List<ScanResult> results;
-  final Set<BluetoothDevice> selected;
-  final ValueChanged<BluetoothDevice> onToggle;
+  final List<ScanHit> results;
+  final Set<DeviceRef> selected;
+  final ValueChanged<DeviceRef> onToggle;
 
   const ScanResultsList({
     super.key,
@@ -303,8 +312,8 @@ class ScanResultsList extends StatelessWidget {
         return CheckboxListTile(
           value: selected.contains(r.device),
           onChanged: (_) => onToggle(r.device),
-          title: Text(r.advertisementData.advName),
-          subtitle: Text('${r.device.remoteId}  •  RSSI ${r.rssi}'),
+          title: Text(r.device.name),
+          subtitle: Text('${r.device.id}  •  RSSI ${r.rssi}'),
         );
       },
     );
