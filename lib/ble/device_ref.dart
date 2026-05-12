@@ -11,7 +11,8 @@
 /// so a [DeviceRef] is safe to use as a [Set] / [Map] key.
 class DeviceRef {
   /// Platform remote id. Stable across runs on Android (MAC); on iOS it's
-  /// the system-assigned UUID, which is also stable per (peripheral, app).
+  /// the system-assigned UUID, which is stable for a given (peripheral,
+  /// app) pair.
   final String id;
 
   /// Advertised name at scan time, or empty if the peripheral didn't
