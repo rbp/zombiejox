@@ -14,7 +14,9 @@ void main() {
     });
 
     test('kg ladder matches docs/ble_protocol.md §2g', () {
-      expect(kWeightKgByIndex, [3.6, 6.4, 9.1, 11.8, 14.5, 17.2, 19.9, 22.7]);
+      // Index 6 is the dock-displayed `20`, not the exact lb→kg conversion
+      // (`19.9`). On-device verified.
+      expect(kWeightKgByIndex, [3.6, 6.4, 9.1, 11.8, 14.5, 17.2, 20.0, 22.7]);
     });
 
     test('lbs values are strictly increasing', () {
@@ -34,6 +36,11 @@ void main() {
       expect(formatWeight(0, WeightUnit.kg), '3.6 kg');
       expect(formatWeight(4, WeightUnit.kg), '14.5 kg');
       expect(formatWeight(7, WeightUnit.kg), '22.7 kg');
+    });
+
+    test('kg whole-number value renders without `.0` (matches dock display)', () {
+      // Index 6 in kg mode shows as `20` on the dock, not `20.0`.
+      expect(formatWeight(6, WeightUnit.kg), '20 kg');
     });
 
     test('out-of-range index returns empty string (UI safety)', () {

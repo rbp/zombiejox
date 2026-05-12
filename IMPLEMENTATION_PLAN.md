@@ -169,10 +169,10 @@ What's still needed to hit the MVP target:
 | 3   | 26   | 11.8 |
 | 4   | 32   | 14.5 |
 | 5   | 38   | 17.2 |
-| 6   | 44   | 19.9 |
+| 6   | 44   | 20   |
 | 7   | 50   | 22.7 |
 
-(kg values are exact lb→kg conversion to 1 decimal place. Verify on a real kg-mode dumbbell once shippable.)
+(kg values match what the dock displays in kg mode — mostly the exact lb→kg conversion to 1 decimal, except index 6 which the dock shows as a whole `20`, not the converted `19.9`. On-device verified.)
 
 ### 1h. Remaining work to close out Phase 1
 
