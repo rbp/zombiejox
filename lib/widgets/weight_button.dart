@@ -27,12 +27,16 @@ class WeightButton extends StatelessWidget {
         : FilledButton.tonal(onPressed: onPressed, child: Text(label));
     // Workout app — the user's eyes are often on the equipment, not the
     // screen. Spell out the selected state for VoiceOver / TalkBack so
-    // a tap doesn't feel ambiguous.
+    // a tap doesn't feel ambiguous. excludeSemantics drops the child
+    // FilledButton's semantics (including its tap action), so we
+    // explicitly forward onTap here — otherwise assistive tech can't
+    // activate the control even when onPressed is non-null.
     return Semantics(
       button: true,
       selected: selected,
       enabled: onPressed != null,
       label: selected ? '$label, currently set' : label,
+      onTap: onPressed,
       excludeSemantics: true,
       child: button,
     );

@@ -27,11 +27,12 @@ class Dumbbell {
 
   /// Battery percentage read from the standard BLE Battery Service during
   /// [connect], stashed here until the first real `0xD1`/`0xD2` arrives
-  /// — at which point [_onBytes] folds it into the emitted state. The
-  /// alternative (fabricating a synthetic `DumbbellState` from a battery
-  /// byte alone) would flip [isReady] true before any unit byte has been
-  /// observed, which `ControlScreen._maybeArmAutoMatch` then has to
-  /// work around. Keep the asymmetry here, not in the consumer.
+  /// — at which point [_onBytes] folds it into the emitted state and
+  /// clears it. The alternative (fabricating a synthetic `DumbbellState`
+  /// from a battery byte alone) would flip [isReady] true before any
+  /// unit byte has been observed, which downstream auto-match logic
+  /// (`UnitAutoMatcher` via `ControlScreen`) would then have to work
+  /// around. Keep the asymmetry here, not in the consumer.
   int? _pendingBatteryPct;
 
   /// Set to `true` by [disconnect]. Once true, [connect] / [setWeightIndex] /
@@ -122,8 +123,12 @@ class Dumbbell {
     if (frame == null) return;
     var next = applyFrame(_last, frame);
     if (next == null || _states.isClosed) return;
-    // Fold a pending battery read into the first emitted state.
-    if (_pendingBatteryPct != null && next.batteryPct == null) {
+    // Fold a pending battery read into the first emitted state, then
+    // clear the stash so a stale value can't outlive the connection.
+    // Battery Service wins over the 0xD1 payload byte — mirrors the
+    // connect-path override at the `_last != null` branch above, which
+    // picks one source consistently.
+    if (_pendingBatteryPct != null) {
       next = next.copyWith(batteryPct: _pendingBatteryPct);
       _pendingBatteryPct = null;
     }
