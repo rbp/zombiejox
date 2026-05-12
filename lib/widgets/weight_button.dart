@@ -22,15 +22,19 @@ class WeightButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = formatWeight(index, unit);
-    if (selected) {
-      return FilledButton(
-        onPressed: onPressed,
-        child: Text(label),
-      );
-    }
-    return FilledButton.tonal(
-      onPressed: onPressed,
-      child: Text(label),
+    final button = selected
+        ? FilledButton(onPressed: onPressed, child: Text(label))
+        : FilledButton.tonal(onPressed: onPressed, child: Text(label));
+    // Workout app — the user's eyes are often on the equipment, not the
+    // screen. Spell out the selected state for VoiceOver / TalkBack so
+    // a tap doesn't feel ambiguous.
+    return Semantics(
+      button: true,
+      selected: selected,
+      enabled: onPressed != null,
+      label: selected ? '$label, currently set' : label,
+      excludeSemantics: true,
+      child: button,
     );
   }
 }

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
+import '../ble/device_display.dart';
+
 /// Card shown for a [BluetoothDevice] whose `connect()` threw. Visually
 /// matches `DumbbellCard` but with an error-coloured "Failed to connect"
 /// status line and a refresh icon for retrying.
@@ -36,7 +38,7 @@ class FailedDeviceCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    _displayName(device),
+                    device.displayName,
                     style: theme.textTheme.titleMedium,
                   ),
                   const SizedBox(height: 2),
@@ -59,10 +61,4 @@ class FailedDeviceCard extends StatelessWidget {
       ),
     );
   }
-}
-
-String _displayName(BluetoothDevice device) {
-  final adv = device.advName;
-  if (adv.isNotEmpty) return adv;
-  return device.remoteId.str;
 }

@@ -10,6 +10,7 @@ class BleConnection {
   final BluetoothDevice device;
   late BluetoothCharacteristic _tx;
   late BluetoothCharacteristic _rx;
+  BluetoothCharacteristic? _batteryLevel;
 
   StreamSubscription<List<int>>? _rxSub;
   final StreamController<List<int>> _rxController =
@@ -43,20 +44,23 @@ class BleConnection {
     );
     await _rx.setNotifyValue(true);
     _rxSub = _rx.onValueReceived.listen(_rxController.add);
+
+    // Resolve the standard Battery Service from the same services list so
+    // `readBatteryLevel` doesn't have to call `discoverServices()` a
+    // second time. Null is fine — older firmwares don't expose it.
+    _batteryLevel = services
+        .where((s) => s.uuid.str.toLowerCase() == JaxJoxUuids.batteryService)
+        .firstOrNull
+        ?.characteristics
+        .where((c) => c.uuid.str.toLowerCase() == JaxJoxUuids.batteryLevel)
+        .firstOrNull;
   }
 
   Future<void> writeTx(List<int> bytes) =>
       _tx.write(bytes, withoutResponse: true);
 
   Future<int?> readBatteryLevel() async {
-    final services = await device.discoverServices();
-    final svc = services
-        .where((s) => s.uuid.str.toLowerCase() == JaxJoxUuids.batteryService)
-        .firstOrNull;
-    if (svc == null) return null;
-    final c = svc.characteristics
-        .where((c) => c.uuid.str.toLowerCase() == JaxJoxUuids.batteryLevel)
-        .firstOrNull;
+    final c = _batteryLevel;
     if (c == null) return null;
     final v = await c.read();
     return v.isEmpty ? null : v.first;
