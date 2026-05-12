@@ -39,6 +39,9 @@ Run these from the repo root.
 
 **Pre-PR checklist (must pass):** `dart format .` → `flutter analyze` → `flutter test`.
 
+NEVER use `git add -A` or `git commit -a`. Add the files you want to commit, individually and intentionally.
+
+
 ## 4. Architecture decisions
 
 ```
