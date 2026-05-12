@@ -134,7 +134,16 @@ void main() {
     ));
     expect(find.text('32 lbs'), findsOneWidget);
     final textBox = tester.getRect(find.text('32 lbs'));
-    final tileBox = tester.getRect(find.byType(WeightButton));
+    // Measure the Material descendant rather than the WeightButton
+    // (StatelessWidget) itself — `getRect` needs a RenderObject-backed
+    // target. The Material wraps the entire tile and is what defines its
+    // visual bounds.
+    final tileBox = tester.getRect(
+      find.descendant(
+        of: find.byType(WeightButton),
+        matching: find.byType(Material),
+      ),
+    );
     expect(textBox.width, lessThanOrEqualTo(tileBox.width));
     expect(textBox.height, lessThanOrEqualTo(tileBox.height));
   });

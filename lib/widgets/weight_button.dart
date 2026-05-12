@@ -9,10 +9,11 @@ import '../state/weights.dart';
 /// Visual contract (PR 1 of the v1 design):
 /// - Fixed rectangular tile, slightly rounded corners, same dimensions
 ///   across all 8 cells. The grid sizes the cell; this widget fills it.
-/// - Container fill from the active [ColorScheme]: selected uses the
-///   primary container, unselected uses the surface variant. No
-///   FilledButton variant swap (M3 `FilledButton` vs `FilledButton.tonal`
-///   resolve to indistinguishable tiles in our scheme).
+/// - Fill comes from the active [ColorScheme]: selected uses
+///   `scheme.primary` with `onPrimary` text; unselected uses
+///   `surfaceContainerHighest` with `onSurface` text. No FilledButton
+///   variant swap (M3 `FilledButton` vs `FilledButton.tonal` resolve to
+///   indistinguishable tiles in our scheme).
 class WeightButton extends StatelessWidget {
   final int index;
   final WeightUnit unit;
