@@ -1,3 +1,7 @@
+<!-- markdownlint-disable -->
+<!-- vale off -->
+<!-- cspell:disable -->
+
 # JaxJox Replacement Flutter App — Implementation Plan
 
 ## Context
@@ -61,8 +65,14 @@ PRs merged against `main`:
 - **PR #8** (`d3d2a8c`) — custom zombie launcher icon + splash for both Android (legacy + adaptive) and iOS.
 - **PR #10** (`a2fa089`) — `0xD1` byte-8 dock-unit parsing + auto-match the app's display unit to the connected dumbbells' on first connect.
 - **PR #14** (`refactor/ble-port`) — bind `flutter_blue_plus` behind a port/adapter (`DeviceRef`, `BleConnectionState`, `BleTransport`, `BleScanner`). The plugin's `BluetoothDevice` / `BluetoothConnectionState` / `DeviceIdentifier` / `ScanResult` types no longer appear above `lib/ble/`. Closes off the top item on PR #12's review list and makes a future plugin swap a one-file change.
+- **PR #15** (`d41d472`) — fix: index 6 kg display is `20`, not `19.9` (on-device verified).
+- **PR #16** (`537eec6`) — refactor: extract `PermissionRequestFlow` from `PermissionScreen` so the rationale → requesting → denied / granted transitions are testable as plain Dart, no widget pump.
+- **PR #17** (`f58e2aa`) — chore: delete the unused `Dumbbell.withTransport` seam (test-only-API sweep).
+- **PR #18** (`89eefbe`) — refactor: `WeightGroup` owns its full state. New `GroupSnapshot` value type carries `connected` / `failed` / `consensusIndex` / `anyMoving` / `anyReady` / `knownUnits` / `knownUnitCount`; consumers subscribe once to `WeightGroup.snapshots` and render as a pure projection. Removes per-dumbbell stream subscriptions and failed-devices bookkeeping from the screen layer.
+- **PR #19** (`65760c0`) — feat(design): §2d PR 1 — visual system + component restyle (no UX change). New `lib/theme/app_theme.dart` (dark M3 scheme seeded from aubergine `#4A1942`); `WeightButton` dropped the `FilledButton` / `FilledButton.tonal` swap in favour of a rounded tile with scheme-driven fill; `DumbbellCard` / `FailedDeviceCard` restyled as button-shaped surfaces with a small status chip; stop icon → `Icons.stop_circle`; weight grid switched to `SliverGridDelegateWithMaxCrossAxisExtent` + `FittedBox(scaleDown)` for TextScaler ≤ 2× safety; 600 dp max-width cap on every screen.
+- **PR #20** (`24dcadf`) — feat(design): §2d PR 2 — single Home screen. Merges scan + control into `lib/screens/home_screen.dart` with three stacked regions (top: selected device cards; middle: weight grid; bottom: scan results minus the top, with a Divider between middle and bottom). Promote-on-tap on scan cards; per-card "×" remove via new optional `onRemove` on both card widgets. Warm-start seeds the top region in `connecting` state immediately and starts the scanner in parallel — no more `pushReplacement` dance. New `WeightGroup.remove(DeviceRef)` primitive (drops a single device from `connected` and/or `failed`, with a race guard in `add`'s catch block). `scan_screen.dart` / `control_screen.dart` and their tests deleted.
 
-The app's current user flow: rationale on first launch → grant → scan (skipped on warm start if remembered devices exist) → tick dumbbells → **Connect (N)** → control screen with N cards + a single weight grid + Settings/About reachable from any screen. Toggling kg/lbs in Settings re-labels everything live. On first connect, if the user hasn't picked a unit yet, the app silently matches whatever the docks are set to (or surfaces a SnackBar if they disagree).
+The app's current user flow: rationale on first launch → grant → home screen. Home shows the selected devices at the top (seeded from warm-start memory on cold launch), the always-visible 8-tile weight grid in the middle, and live scan results in the bottom region. Tapping a scan card promotes it to the top + connects; tapping × on a top card disconnects and drops the slot. Settings/About via the AppBar gear. Toggling kg/lbs in Settings re-labels every weight tile live; on first connect, if the user hasn't picked a unit yet, the app silently matches whatever the docks are set to (SnackBar) or surfaces a "set one in Settings" hint if the docks disagree.
 
 The remaining MVP gap — **edge-case screens** (Bluetooth-off, all out of range, mid-session drops) — is tracked in §1h.
 
@@ -120,28 +130,32 @@ lib/
     weight_group.dart               ✅   N-device fan-out
   state/
     preferences.dart                ✅   units (reactive); remembered device IDs; explicit-unit-choice flag + auto-match-safe setter
+    permission_request_flow.dart    ✅   PR #16: state machine for rationale → requesting → granted / denied transitions
+    unit_auto_matcher.dart          ✅   PR #10/#12: dock-unit decision logic, lifted out of the screen layer
     weights.dart                    ✅   index ↔ lbs ↔ kg lookup, formatWeight(), weightUnitFromRawByte() (0x00=lbs / 0x01=kg)
+  theme/
+    app_theme.dart                  ✅   PR #19: dark M3 scheme seeded from aubergine #4A1942; structured so adding lightTheme later is one block
   screens/
-    scan_screen.dart                ✅   multi-select + Connect (N) + Settings menu entry + warm-start auto-nav to ControlScreen
-    control_screen.dart             ✅   N device cards + weight grid (reactive to unit) + Settings menu entry + auto-match-from-dock
+    home_screen.dart                ✅   PR #20: single screen — selected cards (top) + weight grid (middle) + scan results (bottom). Promote-on-tap; per-card × remove; warm-start seeding; auto-match-from-dock
     permission_screen.dart          ✅   pre-permission rationale; Continue / denied state with retry / open settings
     settings_screen.dart            ✅   lbs/kg SegmentedButton toggle + link to About
     about_screen.dart               ✅   credits + license + protocol-doc reference + disclaimer
+                                        scan_screen.dart and control_screen.dart deleted in PR #20.
   widgets/
-    weight_button.dart              ✅
-    dumbbell_card.dart              ✅
-    failed_device_card.dart         ✅   shown when a device's connect throws; has a refresh icon to retry inline
+    weight_button.dart              ✅   PR #19: rounded tile with FittedBox(scaleDown) for large-font safety
+    dumbbell_card.dart              ✅   PR #19: rounded surface + status chip. PR #20: optional onRemove
+    failed_device_card.dart         ✅   shown when a device's connect throws; refresh + optional × icons
 test/
   protocol/                         ✅   checksum_test, frame_test (incl. 0xD1 unit-byte parse)
-  state/                            ✅   weights_test (incl. weightUnitFromRawByte), preferences_test (units + remembered + explicit-choice flag)
-  devices/                          ✅   weight_group_test
-  widgets/                          ✅   weight_button_test, dumbbell_card_test, failed_device_card_test
-  screens/                          ✅   control_screen_test (incl. auto-match), scan_screen_test (incl. warm-start auto-nav), permission_screen_test, settings_screen_test, about_screen_test
+  state/                            ✅   weights_test (incl. weightUnitFromRawByte), preferences_test, permission_request_flow_test, unit_auto_matcher_test
+  devices/                          ✅   dumbbell_test, weight_group_test (incl. GroupSnapshot derivations + remove() race guard)
+  widgets/                          ✅   weight_button_test (incl. TextScaler 1.6× large-font safety), dumbbell_card_test, failed_device_card_test
+  screens/                          ✅   home_screen_test (warm-start, promote-on-tap, retry, ×-remove, auto-match, unit toggle live re-label, consensus, motor-active, persisted-set), permission_screen_test, settings_screen_test, about_screen_test
 android/app/src/main/AndroidManifest.xml   ✅
 ios/Runner/Info.plist                       ✅
 ```
 
-Total test count: **118 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
+Total test count: **142 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
 
 ### 1e. Platform setup — ✅ done
 
@@ -216,7 +230,6 @@ Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case harde
 ### 2b. UX polish
 - Smooth motion-state animations on weight buttons
 - Better empty / loading / error states
-- Per-device weight override (asymmetric setting), gated behind a Settings toggle
 
 ### 2c. About screen improvements
 
@@ -225,15 +238,20 @@ Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case harde
 - Then, "Rodrigo Pimentel <rbp@isnomore.net> started this project"
 - Then, the rest of the README contents, which is what the About screen currently shows.
 
-### 2d. Design - v1
+### 2d. Design - v1 — ✅ done (PR #19 + PR #20)
 
-Now it's time to make the app look good.
+Shipped in two PRs along a visual-vs-structural seam (see `PLAN_2D.md`):
+
+- **PR #19** — visual system + component restyle. Dark M3 theme seeded from aubergine `#4A1942` in `lib/theme/app_theme.dart`; rounded weight tiles with `FittedBox(scaleDown)` for large-font safety; rounded `DumbbellCard` / `FailedDeviceCard` with a status chip ("Connecting" / "Connected" / "Moving" / "Failed"); `Icons.stop_circle` for the scanner stop; weight grid switched to `SliverGridDelegateWithMaxCrossAxisExtent` so cells reflow on narrow / wide / tablet layouts; 600 dp max-width cap on every screen for tablet / landscape; widget test pumping at `TextScaler.linear(1.6)`.
+- **PR #20** — single Home screen. `lib/screens/home_screen.dart` merges scan + control: top region for selected/remembered cards (min-height ≈ 2 cards, with an empty-state hint), always-visible middle weight grid, divider, bottom scan list with stop/refresh icon. Promote-on-tap (no batched "Connect (N)" button) and per-card "×" remove via new optional `onRemove` on both card widgets. Warm-start seeds the top region in `connecting` state immediately and runs the scanner in parallel — no more `pushReplacement` dance through scan → control. New `WeightGroup.remove(DeviceRef)` primitive with a race guard. Old `scan_screen.dart` / `control_screen.dart` and their tests deleted.
+
+Original notes (kept for reference):
 
 #### Principles
 
 It should feel modern and smooth. Not too minimalist that it feels cold, but definitely not frilly. It should definitely feel designed, not something that a backend developer would make (i.e., not simple text elements on a white background).
 
-Each dumbbell card should look like a button that's either selected or not (instead of looking like an unstyled html checkbox). The weight buttons should all have the same dimensions, and should be rectangular with slightly rouded corners.
+Each dumbbell card should look like a button that's either selected or not (instead of looking like an unstyled html checkbox like on the scan screen). The weight selection buttons should all have the same dimensions, and should be rectangular with slightly rouded corners.
 
 The iOS app https://apps.apple.com/nl/app/jaxjox-connect/id6759603427 is good inspiration. We don't make to make a clone of it, but it has decent design.
 
@@ -268,7 +286,15 @@ The app should work:
 
 The small "stop" / "retry" button on top-right of the scan screen is confusing - especially the "stop" button, which is simply a filled square that looks like an asset is missing. It should have a circle around it, like https://fontawesome.com/icons/duotone/solid/circle-stop
 
-### 2e. ~~kg/lbs unit toggle on the dock~~ — confirmed impossible
+### 2e. Allow user to change the diaplay name of dumbbells
+
+Currently, the name displayed is the device's uid, and is what shows up on the Bluetooth scan and weight control screens. A simple approach is: when the user taps on the portion of the dumbbell card containing the display name (currently, the UUID), a pop-up with a single input field is displayed, prompting the user to rename the dumbbells.  If the user then taps "ok", we store and always use that name for that dumbbell. If they tap "cancel", nothing is changed.
+
+### 2f. Per-device weight override
+i.e., asymmetric setting, gated behind a Settings toggle
+
+
+### ~~kg/lbs unit toggle on the dock~~ — confirmed impossible
 - No app-to-dock unit-write opcode exists (see §1i → *Confirmed impossible*). The user changes the dock's display unit via its own hidden physical gesture; the app reads the result via `0xD1` byte 8 and auto-matches its own display unit (already done in PR #10).
 
 ---
@@ -301,13 +327,12 @@ The small "stop" / "retry" button on top-right of the scan screen is confusing -
 
 ## Recommended Order of Work
 
-**Phase 0 is complete; Phase 1 is one screen away.** End-to-end: set + read weight on N dumbbells, multi-select scan, warm-start auto-reconnect, Settings/About with reactive unit toggle, auto-match-from-dock, custom icon + splash. Only edge-case screens (BT off, all out of range, mid-session drops) remain.
+**Phase 0 is complete; Phase 1 is one screen away; §2d Design v1 has landed.** End-to-end: set + read weight on N dumbbells via a single Home screen with promote-on-tap and per-card × remove, warm-start seeding, Settings/About with reactive unit toggle, auto-match-from-dock, dark M3 theme, large-font + tablet portability, custom icon + splash. Only edge-case screens (BT off, all out of range, mid-session drops) remain to finish Phase 1.
 
 1. ✅ Phase 0 reverse-engineering (0a–0e done; 0f closed via static analysis — no HCI snoop needed)
-2. 🟡 Phase 1 — Flutter MVP — six PRs merged (#1, #2, #3, #7, #8, #10); only edge-case screens (§1h) outstanding.
-3. ⏳ Phase 2 — UX and UI improvements; make the app a joy to use.
-4. ⏳ Phase 3 — Polish, error handling, edge-case hardening
-5. ⏳ Phase 3 — Testing & distribution
+2. 🟡 Phase 1 — Flutter MVP — PRs merged: #1, #2, #3, #7, #8, #10, #14–#20; only edge-case screens (§1h) outstanding.
+3. 🟡 Phase 2 — UX and UI improvements. §2d Design v1 shipped via #19 + #20. Still pending: §2a (state-stream robustness), §2b (UX polish), §2c (About screen improvements), §2e (rename dumbbells), §2f (per-device weight override).
+4. ⏳ Phase 3 — Testing & distribution
 
 ---
 
@@ -317,7 +342,7 @@ The small "stop" / "retry" button on top-right of the scan screen is confusing -
 
 - ✅ **Protocol correctness** — `0xD6 <idx>` sent from nRF Connect physically moves the dumbbell across all 8 indices on `DB200-0161997`.
 - ✅ **Protocol unit tests** — `test/protocol/checksum_test.dart` and `test/protocol/frame_test.dart` exercise the checksum algorithm and the frame builder/parser round-trip.
-- ✅ **State + group + widget + screen unit tests** — 118 tests total covering `state/{weights,preferences,unit_auto_matcher}`, `devices/{dumbbell,weight_group}`, `widgets/{weight_button,dumbbell_card,failed_device_card}`, `screens/{control,scan,permission,settings,about}_screen`. Includes the auto-match-from-dock debounce + decision logic and the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
+- ✅ **State + group + widget + screen unit tests** — 142 tests total covering `state/{weights,preferences,unit_auto_matcher,permission_request_flow}`, `devices/{dumbbell,weight_group}` (incl. `GroupSnapshot` derivations + `remove()` race guard), `widgets/{weight_button,dumbbell_card,failed_device_card}` (incl. `TextScaler` 1.6× large-font safety + the optional `onRemove` affordance), `screens/{home,permission,settings,about}_screen` (warm-start seeding, promote-on-tap, retry, ×-remove, auto-match-from-dock, unit-toggle live re-label, consensus / motor-active, persisted-set). Includes the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
 - ✅ **Multi-device fan-out (architectural)** — `WeightGroup.setWeightIndex` fan-out covered by unit tests against a fake-Dumbbell.
 
 ### Pending — needs on-device verification (Android + iOS)
@@ -326,20 +351,18 @@ The unit + widget test suites cover the pure-Dart and Flutter-widget layers, but
 
 #### Android (primary dev platform)
 
-- Permission rationale → Continue → OS prompt fires → grant → lands on scan screen.
+- Permission rationale → Continue → OS prompt fires → grant → lands on the Home screen.
 - Permission rationale → Continue → OS prompt → deny → lands on the denied-state UI with `Open Settings` and `Try again`.
 - `Try again` reverts to the rationale and re-requests on Continue.
 - Revoke Bluetooth permission via Settings.app, relaunch app: rationale shows again (because `Permission.bluetoothScan.isGranted` is now false). Verifies the routing-on-status logic.
-- Scan finds at least one `DB200` dumbbell when in range.
-- Multi-select two devices → Connect (2) → both connect → control screen shows two cards.
-- Tapping any weight button physically moves the dumbbell(s) to that setting.
-- Tapping "8 lbs" / "50 lbs" hits the extremes correctly.
-- Switching to kg in Settings re-labels every button across both visible screens **without** a navigation round-trip (validates the reactive `Preferences.unit` listener).
+- Cold launch with no remembered devices: top region shows "Tap a dumbbell below to connect"; bottom region scans and lists at least one `DB200` dumbbell when in range.
+- Tap a scan card → it moves to the top region in `connecting` state and the connect kicks off immediately (promote-on-tap).
+- Tap × on a top card: dumbbell disconnects, slot drops, scanner keeps running. If you do it while still `connecting`, the racing connect doesn't resurrect the slot.
+- Tap weight buttons → physically moves the dumbbell(s) to that setting. Extremes "8 lbs" / "50 lbs" both work.
+- Switching to kg in Settings re-labels every weight tile live **without** a navigation round-trip (validates the reactive `Preferences.unit` listener).
 - About screen renders with credits, license, disclaimer, and the `docs/ble_protocol.md` reference visible without scrolling jankiness.
-- Killing and reopening the app: scan finds the same device and a fresh connect-then-set-weight round-trip works.
-- **Warm-start auto-reconnect**: after a successful Connect (N), kill the app and relaunch. The scan screen should not be visible — the app should land directly on the control screen, with the previously-connected dumbbell(s) reconnecting in parallel.
-- On the warm-start path, if a remembered dumbbell is out of range / offline, the FailedDeviceCard should appear with a retry button (validates the same fallback as the cold-start connect-failure flow).
-- Disconnect-all from the control screen → lands on the scan screen → kill and relaunch → app auto-navigates to control screen again (Disconnect-all does NOT forget remembered devices, only the next Connect (N) does).
+- **Warm-start**: after a verified connect, kill the app and relaunch. The Home screen seeds the top region with the previously-connected dumbbells in `connecting` state on the first frame; the scanner also starts immediately. No flash of an empty top region.
+- On the warm-start path, if a remembered dumbbell is out of range / offline, the `FailedDeviceCard` appears with a refresh icon for retry and an × for dismissal.
 - Battery percentage on each card matches what nRF Connect shows for the same device.
 - **Auto-match dock unit (no prior Settings choice)**: with both docks on kg via the physical gesture, connect → "Unit set to kg to match your dumbbells." SnackBar, weight buttons re-label to `3.6 kg` … `22.7 kg`. Disconnect, flip one dock to lbs, reconnect → "Dumbbells are set to different units — pick one in Settings" SnackBar; app display unit unchanged.
 - **Auto-match no-op after explicit pick**: open Settings, tap the lbs/kg toggle (either side counts as explicit). Reconnect with any unit combination → no SnackBar, no preference change.
