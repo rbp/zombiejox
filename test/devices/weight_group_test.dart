@@ -79,10 +79,14 @@ class FakeDumbbell extends Dumbbell {
   @override
   Future<void> connect() async {
     connectCalled = true;
-    if (failConnect) throw connectError;
     if (_connectGate != null) {
       await _connectGate!.future;
     }
+    // failConnect is checked AFTER the gate so a test can hold connect
+    // open, mutate `failConnect` mid-flight, then release — exercising
+    // the failure-after-gate race window (e.g. WeightGroup.remove
+    // running while connect is awaiting).
+    if (failConnect) throw connectError;
     if (startsReady) _ready = true;
   }
 
@@ -610,6 +614,98 @@ void main() {
         group.add(_device('AA:01')),
         throwsA(isA<StateError>()),
       );
+    });
+  });
+
+  group('remove()', () {
+    test('drops a connected device + disconnects it + emits snapshot',
+        () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      await group.add(_device('AA:02'));
+      expect(group.lastSnapshot.connected, hasLength(2));
+
+      await group.remove(_device('AA:01'));
+
+      expect(group.lastSnapshot.connected, hasLength(1));
+      expect(group.lastSnapshot.connected.single, same(fakes[1]));
+      expect(fakes[0].disconnectCalled, isTrue,
+          reason: 'removed dumbbell must be disconnected');
+      expect(fakes[1].disconnectCalled, isFalse,
+          reason: 'the other member must NOT be touched');
+    });
+
+    test('drops a failed entry without re-throwing', () async {
+      final group =
+          WeightGroup(newDumbbell: (d) => FakeDumbbell(d)..failConnect = true);
+      await group.add(_device('AA:01'));
+      expect(group.lastSnapshot.failed, hasLength(1));
+
+      await group.remove(_device('AA:01'));
+      expect(group.lastSnapshot.failed, isEmpty,
+          reason: 'remove must clear the failed entry');
+      expect(group.lastSnapshot.connected, isEmpty);
+    });
+
+    test(
+        'against a device that is neither connected nor failed is a quiet '
+        'no-op (does not emit a redundant snapshot)', () async {
+      var emissions = 0;
+      final group = WeightGroup(newDumbbell: (d) => FakeDumbbell(d));
+      final sub = group.snapshots.listen((_) => emissions++);
+      await group.add(_device('AA:01'));
+      final pre = emissions;
+
+      await group.remove(_device('NEVER:SEEN'));
+      await pumpEventQueue();
+
+      expect(emissions, pre, reason: 'no membership change → no emission');
+      await sub.cancel();
+    });
+
+    test('after disposal is a quiet no-op', () async {
+      final group = WeightGroup(newDumbbell: (d) => FakeDumbbell(d));
+      await group.disconnectAll();
+      await expectLater(group.remove(_device('AA:01')), completes);
+    });
+
+    test(
+        'during an in-flight add(): the racing connect cannot resurrect the '
+        'failed entry the user just dismissed', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d)..delayConnect();
+        fakes.add(f);
+        return f;
+      });
+
+      // Kick off an add() but don't await — yields the loop with the
+      // dumbbell in `connected` and the connect awaiting our gate.
+      final addFuture = group.add(_device('AA:01'));
+      await pumpEventQueue();
+      expect(group.lastSnapshot.connected, hasLength(1));
+
+      // User taps × on the connecting card.
+      await group.remove(_device('AA:01'));
+      expect(group.lastSnapshot.connected, isEmpty);
+      expect(group.lastSnapshot.failed, isEmpty);
+
+      // Now arm a failure and release the gate. The catch block's race
+      // guard sees `_stateSubs` no longer contains the dumbbell and
+      // skips the failure-snapshot population.
+      fakes.single.failConnect = true;
+      fakes.single.completeConnect();
+      await addFuture;
+      await pumpEventQueue();
+
+      expect(group.lastSnapshot.failed, isEmpty,
+          reason: 'racing failure must not resurrect the dismissed slot');
+      expect(fakes.single.disconnectCalled, isTrue);
     });
   });
 }

@@ -50,7 +50,44 @@ void main() {
         onRetry: () {},
       ),
     );
-    final btn = tester.widget<IconButton>(find.byType(IconButton));
+    // Match the refresh button specifically — when `onRemove` is null
+    // there's only one IconButton, but be explicit so the test keeps
+    // working when callers wire `onRemove`.
+    final btn = tester.widget<IconButton>(
+      find.ancestor(
+        of: find.byIcon(Icons.refresh),
+        matching: find.byType(IconButton),
+      ),
+    );
     expect(btn.tooltip, contains('connection timed out'));
+  });
+
+  testWidgets('onRemove absent → no × icon rendered', (tester) async {
+    await _pump(
+      tester,
+      FailedDeviceCard(
+        device: _device('AA:01'),
+        error: StateError('boom'),
+        onRetry: () {},
+      ),
+    );
+    expect(find.byIcon(Icons.close), findsNothing);
+  });
+
+  testWidgets('onRemove present → × icon renders and tap fires the callback',
+      (tester) async {
+    var removes = 0;
+    await _pump(
+      tester,
+      FailedDeviceCard(
+        device: _device('AA:01'),
+        error: StateError('boom'),
+        onRetry: () {},
+        onRemove: () => removes++,
+      ),
+    );
+    expect(find.byIcon(Icons.close), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.close));
+    expect(removes, 1);
   });
 }

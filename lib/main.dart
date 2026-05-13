@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'screens/home_screen.dart';
 import 'screens/permission_screen.dart';
-import 'screens/scan_screen.dart';
 import 'state/preferences.dart';
 import 'theme/app_theme.dart';
 
@@ -17,9 +17,9 @@ Future<void> main() async {
 }
 
 /// Quick non-prompting check of the Bluetooth permission state. Used to
-/// decide between the rationale screen (not granted) and going straight to
-/// scan (granted). Re-checked on every cold start so OS-level revocations
-/// re-trigger the rationale.
+/// decide between the rationale screen (not granted) and going straight
+/// to the home screen (granted). Re-checked on every cold start so OS-
+/// level revocations re-trigger the rationale.
 ///
 /// Defaults to `false` on plugin-channel failure so a flaky platform call
 /// can't crash startup — the user lands on the rationale screen, which is
@@ -47,7 +47,7 @@ class ZombieJoxApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final home = permissionsGranted
-        ? ScanScreen(preferences: preferences)
+        ? HomeScreen(preferences: preferences)
         : PermissionScreen(preferences: preferences);
 
     return MaterialApp(

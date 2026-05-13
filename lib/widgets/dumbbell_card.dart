@@ -17,10 +17,17 @@ class DumbbellCard extends StatelessWidget {
   final Dumbbell dumbbell;
   final WeightUnit unit;
 
+  /// Optional remove affordance. When non-null, the card renders a small
+  /// "×" close button on the trailing edge that invokes this callback.
+  /// HomeScreen passes a callback that removes the device from the
+  /// `WeightGroup` and from its own selected list.
+  final VoidCallback? onRemove;
+
   const DumbbellCard({
     super.key,
     required this.dumbbell,
     required this.unit,
+    this.onRemove,
   });
 
   @override
@@ -39,6 +46,7 @@ class DumbbellCard extends StatelessWidget {
               connected: connected,
               state: state,
               unit: unit,
+              onRemove: onRemove,
             );
           },
         );
@@ -52,12 +60,14 @@ class _Card extends StatelessWidget {
   final bool connected;
   final DumbbellState? state;
   final WeightUnit unit;
+  final VoidCallback? onRemove;
 
   const _Card({
     required this.name,
     required this.connected,
     required this.state,
     required this.unit,
+    required this.onRemove,
   });
 
   @override
@@ -130,6 +140,15 @@ class _Card extends StatelessWidget {
                   ),
               ],
             ),
+            if (onRemove != null) ...[
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: 'Remove $name',
+                visualDensity: VisualDensity.compact,
+                onPressed: onRemove,
+              ),
+            ],
           ],
         ),
       ),

@@ -37,8 +37,8 @@ class Preferences {
 
   /// Whether the user has *explicitly* picked a unit via the Settings
   /// toggle (vs. the value still being the locale-derived default or an
-  /// auto-match from the dock). Once true, the auto-match-from-dock UX in
-  /// [ControlScreen] becomes a no-op. Persists across launches.
+  /// auto-match from the dock). Once true, the auto-match-from-dock UX
+  /// in `HomeScreen` becomes a no-op. Persists across launches.
   bool get unitExplicitlyChosen => _prefs.getBool(_keyUnitExplicit) ?? false;
 
   /// User-facing setter — flips [unitExplicitlyChosen] to true regardless
@@ -57,7 +57,7 @@ class Preferences {
     _unit.value = unit;
   }
 
-  /// Auto-match setter — used by ControlScreen when all connected
+  /// Auto-match setter — used by `HomeScreen` when all connected
   /// dumbbells agree on a unit and the user hasn't picked one yet. No-op
   /// if [unitExplicitlyChosen] is already true, or if the current value
   /// already matches. Returns true iff the persisted value actually
@@ -71,15 +71,13 @@ class Preferences {
   }
 
   /// Remote IDs of the dumbbells from the user's most recent *verified*
-  /// successful connect — written only after at least one member of the
-  /// connected group reaches `Dumbbell.isReady` (via the `onAnyConnected`
-  /// callback ScanScreen hooks into ControlScreen). A Connect-tap that
-  /// fails on every device never updates this list, so warm-start
-  /// auto-navigation always tries to reconnect to a set that has worked
-  /// at least once before. Used to skip the scan step on warm start —
-  /// read by `ScanScreen._ensurePermissions` to decide whether to
-  /// auto-navigate straight to ControlScreen. Empty before the first
-  /// verified successful connect.
+  /// successful connect — written only after at least one selected
+  /// device has reached `Dumbbell.isReady` at least once during a
+  /// session. A Connect attempt that fails on every device never
+  /// updates this list, so warm-start always tries to reconnect to a
+  /// set that has worked at least once before. Read by `HomeScreen` on
+  /// init to seed the top region in `connecting` state immediately.
+  /// Empty before the first verified successful connect.
   ///
   /// We persist plain id strings rather than serialised `DeviceRef`s —
   /// the id is the only field that survives across runs anyway, and any
