@@ -60,7 +60,7 @@ void main() {
         reason: 'logo above the app name');
     expect(find.textContaining('github.com/rbp/zombiejox'), findsOneWidget);
     expect(find.textContaining('Rodrigo Pimentel'), findsOneWidget);
-    expect(find.textContaining('rbp@isnomore.net'), findsOneWidget);
+    expect(find.text('rbp@isnomore.net'), findsOneWidget);
     expect(find.textContaining('started this project'), findsOneWidget);
   });
 
@@ -74,16 +74,24 @@ void main() {
     expect(launched.single.toString(), 'https://github.com/rbp/zombiejox');
   });
 
-  testWidgets('tapping the author row launches a mailto: URL',
+  testWidgets('tapping the email — and ONLY the email — launches mailto:',
       (tester) async {
     final launched = await pumpAbout(tester);
 
-    await tester.tap(find.textContaining('Rodrigo Pimentel'));
+    // The email span is the only tappable element on the author line:
+    // the leading icon and the surrounding "Rodrigo Pimentel <…> started
+    // this project." text are inert.
+    await tester.tap(find.text('rbp@isnomore.net'));
     await tester.pump();
-
     expect(launched, hasLength(1));
     expect(launched.single.scheme, 'mailto');
     expect(launched.single.path, 'rbp@isnomore.net');
+
+    // Tap the leading person icon — must not launch anything.
+    await tester.tap(find.byIcon(Icons.person_outline));
+    await tester.pump();
+    expect(launched, hasLength(1),
+        reason: 'icon is not wrapped in an InkWell — must not launch');
   });
 
   testWidgets('a failing launch surfaces a SnackBar (not an uncaught error)',

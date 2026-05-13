@@ -96,12 +96,9 @@ class AboutScreen extends StatelessWidget {
                 color: scheme.primary,
                 onTap: () => _open(context, _repoUri),
               ),
-              _LinkRow(
-                icon: Icons.person_outline,
-                label: 'Rodrigo Pimentel <rbp@isnomore.net> started this project.',
-                tooltip: 'Email the author',
+              _AuthorLine(
                 color: scheme.primary,
-                onTap: () => _open(context, _authorEmailUri),
+                onTapEmail: () => _open(context, _authorEmailUri),
               ),
               const SizedBox(height: 24),
               Text('Credits', style: theme.textTheme.titleMedium),
@@ -145,8 +142,71 @@ class AboutScreen extends StatelessWidget {
   }
 }
 
-/// One tappable row with an icon + label. Shared shape for the GitHub
-/// link and the "started by" line so they read as a related pair.
+/// "Rodrigo Pimentel \<rbp@isnomore.net\> started this project." with
+/// ONLY the email span tappable — the surrounding text and the leading
+/// person icon are inert. Uses [WidgetSpan] + [InkWell] (rather than
+/// `Text.rich` + `TapGestureRecognizer`) so we don't have to manage the
+/// recognizer's lifecycle from a parent state.
+class _AuthorLine extends StatelessWidget {
+  final Color color;
+  final VoidCallback onTapEmail;
+
+  const _AuthorLine({required this.color, required this.onTapEmail});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final baseStyle = theme.textTheme.bodyMedium ?? const TextStyle();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.person_outline,
+            size: 20,
+            color: baseStyle.color?.withValues(alpha: 0.7),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                style: baseStyle,
+                children: [
+                  const TextSpan(text: 'Rodrigo Pimentel <'),
+                  WidgetSpan(
+                    alignment: PlaceholderAlignment.baseline,
+                    baseline: TextBaseline.alphabetic,
+                    child: Tooltip(
+                      message: 'Email the author',
+                      child: InkWell(
+                        onTap: onTapEmail,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Text(
+                          'rbp@isnomore.net',
+                          style: TextStyle(
+                            color: color,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const TextSpan(text: '> started this project.'),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One tappable row with an icon + label. Used for the GitHub link
+/// where the entire label IS the target — see [_AuthorLine] for the
+/// email case where only a single span inside the line should be
+/// tappable.
 class _LinkRow extends StatelessWidget {
   final IconData icon;
   final String label;

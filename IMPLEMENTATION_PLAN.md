@@ -164,14 +164,13 @@ Android `<uses-permission>` entries (`BLUETOOTH_SCAN` with `neverForLocation`, `
 ### 1f. User flow — 🟡 user flow complete; edge-case screens still pending
 
 What works:
-- ✅ **First launch**: pre-permission rationale screen ("ZombieJox needs Bluetooth…") → Continue → OS prompt → scan. If the user denies, the screen flips to a "Permission was denied" state with `Open Settings` + `Try again` buttons.
-- ✅ Routing on every cold start checks the actual `Permission.bluetoothScan` / `bluetoothConnect` status — granted goes straight to scan; revoked-since-last-launch (Android) re-shows the rationale automatically. No flag in Preferences.
-- ✅ **Multi-select on scan**: tick the dumbbells you want, tap "Connect (N)".
-- ✅ **Warm-start auto-reconnect**: on cold start, if `Preferences.rememberedDeviceIds` is non-empty, ScanScreen navigates straight to ControlScreen and kicks off connects in parallel. The remembered set is saved each time at least one member of the most-recent Connect (N) verifies a successful connect, so a failed attempt doesn't poison the warm-start fast path. Disconnect-all returns to ScanScreen without re-auto-navigating until the next cold start.
-- ✅ **Control screen with N device cards**: one card per connected dumbbell, single weight grid below; one tap fans `0xD6` to all of them.
-- ✅ **Settings**: lbs/kg toggle (reactive — flipping it re-labels everything live across visible screens), link to About. Reachable from a gear icon on both scan and control screens.
+- ✅ **First launch**: pre-permission rationale screen ("ZombieJox needs Bluetooth…") → Continue → OS prompt → Home. If the user denies, the screen flips to a "Permission was denied" state with `Open Settings` + `Try again` buttons.
+- ✅ Routing on every cold start checks the actual `Permission.bluetoothScan` / `bluetoothConnect` status — granted goes straight to Home; revoked-since-last-launch (Android) re-shows the rationale automatically. No flag in Preferences.
+- ✅ **Joint Home screen** (§2d PR #20): one screen with selected device cards on top, the 8-tile weight grid in the middle, and live scan results at the bottom. Promote-on-tap on a scan card adds it to the top region and kicks off the connect immediately; per-card "×" removes it (disconnect + drop the slot). One weight tap fans `0xD6` to every ready member.
+- ✅ **Warm-start auto-reconnect**: on cold start, if `Preferences.rememberedDeviceIds` is non-empty, the Home screen seeds the top region with those device refs in `connecting` state on the first frame and kicks off `WeightGroup.add` for each, while the scanner starts in parallel. The remembered set is saved on the first verified ready of any member, then kept in sync on every later promote / × so a failed attempt doesn't poison the warm-start fast path.
+- ✅ **Settings**: lbs/kg toggle (reactive — flipping it re-labels every weight tile live without a navigation round-trip), link to About. Reachable from the gear icon on the Home screen's AppBar.
 - ✅ **Auto-match dock unit**: on first connect, if the user hasn't explicitly picked a unit, the app reads `0xD1` byte 8 from each ready dumbbell (`0x00`=lbs, `0x01`=kg). All agree → silently match (SnackBar if it actually changed). Disagree → SnackBar pointing the user to Settings. Once they tap Settings, the auto-match is a no-op forever — their choice wins.
-- ✅ **About**: credits to Eamon Tuhami / X8IQ, original JaxJox engineering team, link to `docs/ble_protocol.md`, license, disclaimer.
+- ✅ **About** (§2c PR #21): logo at the top, tappable GitHub + author-email rows, credits to Eamon Tuhami / X8IQ, original JaxJox engineering team, link to `docs/ble_protocol.md`, license, disclaimer.
 - ✅ Manual weight changes (via dock buttons) reflected in the UI via `0xD2` byte 11.
 - ✅ **Custom logo wired into icon and splash** — pixel-art zombie + dumbbell on cream `#F4ECD4`, adaptive on Android (cream background + transparent foreground PNG with launcher-applied 16% safe-zone inset), full-bleed cream on iOS. Splash matches.
 
@@ -195,7 +194,7 @@ What's still needed to hit the MVP target:
 
 ### 1h. Remaining work to close out Phase 1
 
-✅ Done: `shared_preferences`; `state/weights.dart` (incl. `weightUnitFromRawByte`); reactive `state/preferences.dart` (units + remembered device IDs + explicit-choice flag); `devices/weight_group.dart`; `widgets/{weight_button,dumbbell_card,failed_device_card}.dart`; `screens/{control,scan,permission,settings,about}_screen.dart`; multi-select on the scan screen; Settings/About reachable via gear icon; warm-start auto-reconnect to remembered dumbbells; auto-match-from-dock on first connect; `0xD1` byte-8 unit parsing with on-device-confirmed mapping; custom launcher icon + splash.
+✅ Done: `shared_preferences`; `state/weights.dart` (incl. `weightUnitFromRawByte`); reactive `state/preferences.dart` (units + remembered device IDs + explicit-choice flag); `state/{permission_request_flow,unit_auto_matcher}.dart`; `devices/{dumbbell,weight_group}.dart` (with `GroupSnapshot` + `remove()`); `widgets/{weight_button,dumbbell_card,failed_device_card}.dart`; `theme/app_theme.dart`; `screens/{home,permission,settings,about}_screen.dart`; promote-on-tap selection on the joint Home screen; per-card "×" remove; Settings/About reachable via gear icon; warm-start auto-reconnect to remembered dumbbells (seeds the top region in `connecting` state on the first frame); auto-match-from-dock on first connect; `0xD1` byte-8 unit parsing with on-device-confirmed mapping; custom launcher icon + splash.
 
 Still pending:
 
@@ -299,7 +298,7 @@ The small "stop" / "retry" button on top-right of the scan screen is confusing -
 
 ### 2e. Allow user to change the diaplay name of dumbbells
 
-Currently, the name displayed is the device's uid, and is what shows up on the Bluetooth scan and weight control screens. A simple approach is: when the user taps on the portion of the dumbbell card containing the display name (currently, the UUID), a pop-up with a single input field is displayed, prompting the user to rename the dumbbells.  If the user then taps "ok", we store and always use that name for that dumbbell. If they tap "cancel", nothing is changed.
+Currently, the name displayed is the device's uid, and is what shows up across the Home screen (top region cards and the bottom scan list). A simple approach is: when the user taps on the portion of the dumbbell card containing the display name (currently, the UUID), a pop-up with a single input field is displayed, prompting the user to rename the dumbbells. If the user then taps "ok", we store and always use that name for that dumbbell. If they tap "cancel", nothing is changed.
 
 ### 2f. Per-device weight override
 i.e., asymmetric setting, gated behind a Settings toggle
@@ -383,6 +382,6 @@ The unit + widget test suites cover the pure-Dart and Flutter-widget layers, but
 #### iOS (verification platform)
 
 - The whole list above on a real iPhone — flutter_blue_plus and `permission_handler` behave subtly differently from Android, and BLE absolutely does not work in the iOS simulator.
-- **Specifically test the permission rationale's first-launch behaviour on iOS.** `permission_handler` reports `denied` for `Permission.bluetoothScan`/`bluetoothConnect` on iOS until the OS has prompted at least once, *but* the OS prompt itself is triggered by `flutter_blue_plus`'s first BLE op (controlled by `NSBluetoothAlwaysUsageDescription` in `ios/Runner/Info.plist`), not by our `permission_handler.request()` call. If the rationale screen doesn't show on first launch, or if Continue feels like a no-op (iOS already reported "granted" so we navigate to scan, then the OS prompt fires from `ScanScreen`'s first BLE call), we'll need to revisit the routing logic — possibly bring back a "rationale shown" flag specifically for iOS. The current implementation assumes iOS reports `denied` on first launch; this is the riskiest unverified assumption in the project right now.
+- **Specifically test the permission rationale's first-launch behaviour on iOS.** `permission_handler` reports `denied` for `Permission.bluetoothScan`/`bluetoothConnect` on iOS until the OS has prompted at least once, *but* the OS prompt itself is triggered by `flutter_blue_plus`'s first BLE op (controlled by `NSBluetoothAlwaysUsageDescription` in `ios/Runner/Info.plist`), not by our `permission_handler.request()` call. If the rationale screen doesn't show on first launch, or if Continue feels like a no-op (iOS already reported "granted" so we navigate to Home, then the OS prompt fires from `HomeScreen`'s first BLE call), we'll need to revisit the routing logic — possibly bring back a "rationale shown" flag specifically for iOS. The current implementation assumes iOS reports `denied` on first launch; this is the riskiest unverified assumption in the project right now.
 - The lbs/kg toggle in Settings actually re-labels the buttons live (verifies `ValueListenable` works through the iOS Flutter render path).
 - TestFlight build is producible with the current scaffold.
