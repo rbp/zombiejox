@@ -194,11 +194,24 @@ class SelectionModel extends ChangeNotifier {
     // Fire-and-forget — the caller doesn't need to wait, and
     // SharedPreferences writes are single-process / serialized
     // internally. A failure here is a logged debugPrint at worst; we
-    // don't surface a UI error for a sub-100µs write to a JSON file.
+    // don't block the UI on a write to a small JSON file.
     unawaited(_preferences
         .setRememberedDeviceIds([for (final e in _entries) e.device.id]));
   }
 
+  /// **Invariant** (enforced by [_hydrate] and [add]): every
+  /// [SelectionEntry] in [_entries] carries the [Preferences.customDeviceNames]
+  /// value for its `device.id` at the time the entry was created. Both
+  /// constructors of an entry seed [SelectionEntry.customName] from the
+  /// current prefs map, and [rename] is the only path that can change
+  /// it — and it always writes a fresh, intentional value.
+  ///
+  /// That invariant is what lets this method safely *exclude* selected
+  /// ids from the "preserved names for non-selected devices" merge
+  /// below: a selected device's entry IS the authoritative current
+  /// value, so the on-disk entry for the same id would be stale at
+  /// best (and equal at worst). Without the invariant, this filter
+  /// could drop a previously-named selected device's rename.
   void _persistCustomNames() {
     final out = <String, String>{};
     for (final e in _entries) {
