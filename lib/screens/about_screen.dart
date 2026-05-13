@@ -1,13 +1,51 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// About screen. Static content: who built this, what it's for, what it
 /// runs on top of. Reachable from Settings.
+///
+/// Layout (§2c of IMPLEMENTATION_PLAN.md):
+///   1. Logo + app name + tagline at the top.
+///   2. "What it is" pitch.
+///   3. GitHub link + "Created by Rodrigo Pimentel \<rbp@isnomore.net\>"
+///      — both rows hand off to the OS via `url_launcher`. The GitHub
+///      row is fully tappable; on the author row only the email span is.
+///   4. Credits / Protocol / License / Disclaimer.
 class AboutScreen extends StatelessWidget {
-  const AboutScreen({super.key});
+  /// Override the URL launcher — used by widget tests to avoid the
+  /// `url_launcher` platform channel and to assert on the URIs we
+  /// hand to the OS. Production leaves this null and the screen calls
+  /// `launchUrl(uri, mode: LaunchMode.externalApplication)`.
+  final Future<bool> Function(Uri)? launchUri;
+
+  const AboutScreen({super.key, this.launchUri});
+
+  static final Uri _repoUri = Uri.parse('https://github.com/rbp/zombiejox');
+  static final Uri _authorEmailUri = Uri.parse('mailto:rbp@isnomore.net');
+
+  Future<void> _open(BuildContext context, Uri uri) async {
+    final launch = launchUri ??
+        (u) => launchUrl(u, mode: LaunchMode.externalApplication);
+    bool ok;
+    try {
+      ok = await launch(uri);
+    } catch (_) {
+      ok = false;
+    }
+    if (!context.mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open $uri')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('About')),
       body: Center(
@@ -16,6 +54,34 @@ class AboutScreen extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.all(24),
             children: [
+              // Logo above app name. The PNG is the cream-background app
+              // icon — same image the launcher uses — clipped to a
+              // rounded rectangle so it reads as an icon, not a banner.
+              //
+              // cacheWidth / cacheHeight: the source PNG is 1024×1024
+              // but it's displayed at 120 logical px. Without the
+              // hints, Flutter would decode the full 1024² into memory
+              // (~4 MB ARGB) and pay the CPU/GC cost on every About
+              // open. Decode to device-pixel-exact size instead.
+              Center(
+                child: Builder(
+                  builder: (context) {
+                    final dpr = MediaQuery.devicePixelRatioOf(context);
+                    final decoded = (120 * dpr).round();
+                    return ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: Image.asset(
+                        'assets/icon-1024.png',
+                        width: 120,
+                        height: 120,
+                        cacheWidth: decoded,
+                        cacheHeight: decoded,
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
               Center(
                 child: Text('ZombieJox', style: theme.textTheme.displaySmall),
               ),
@@ -37,6 +103,22 @@ class AboutScreen extends StatelessWidget {
                 'Connect app. ZombieJox controls JaxJox DumbbellConnect (and '
                 'eventually other JaxJox products) over Bluetooth. No cloud, no '
                 'account, no telemetry.',
+              ),
+              const SizedBox(height: 16),
+              _LinkRow(
+                icon: Icons.code,
+                label: 'github.com/rbp/zombiejox',
+                tooltip: 'Open the project on GitHub',
+                color: scheme.primary,
+                // `_open` is async; the VoidCallback expects void. Wrap
+                // in `unawaited` so the discarded Future is intentional
+                // (matches the HomeScreen pattern).
+                onTap: () => unawaited(_open(context, _repoUri)),
+              ),
+              _AuthorLine(
+                color: scheme.primary,
+                onTapEmail: () =>
+                    unawaited(_open(context, _authorEmailUri)),
               ),
               const SizedBox(height: 24),
               Text('Credits', style: theme.textTheme.titleMedium),
@@ -71,6 +153,117 @@ class AboutScreen extends StatelessWidget {
               const Text(
                 'ZombieJox is not affiliated with JaxJox, its administrators, or '
                 'any successor entity. Provided as-is, no warranty.',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// "Created by Rodrigo Pimentel \<rbp@isnomore.net\>" with ONLY the
+/// email span tappable — the surrounding text and the leading person
+/// icon are inert. Uses [WidgetSpan] + [InkWell] (rather than
+/// `Text.rich` + `TapGestureRecognizer`) so we don't have to manage the
+/// recognizer's lifecycle from a parent state.
+class _AuthorLine extends StatelessWidget {
+  final Color color;
+  final VoidCallback onTapEmail;
+
+  const _AuthorLine({required this.color, required this.onTapEmail});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final baseStyle = theme.textTheme.bodyMedium ?? const TextStyle();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.person_outline,
+            size: 20,
+            color: baseStyle.color?.withValues(alpha: 0.7),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                style: baseStyle,
+                children: [
+                  const TextSpan(text: 'Created by Rodrigo Pimentel <'),
+                  WidgetSpan(
+                    alignment: PlaceholderAlignment.baseline,
+                    baseline: TextBaseline.alphabetic,
+                    child: Tooltip(
+                      message: 'Email the author',
+                      child: InkWell(
+                        onTap: onTapEmail,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Text(
+                          'rbp@isnomore.net',
+                          style: TextStyle(
+                            color: color,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const TextSpan(text: '>'),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One tappable row with an icon + label. Used for the GitHub link
+/// where the entire label IS the target — see [_AuthorLine] for the
+/// email case where only a single span inside the line should be
+/// tappable.
+class _LinkRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String tooltip;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _LinkRow({
+    required this.icon,
+    required this.label,
+    required this.tooltip,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(icon, size: 20, color: color),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: color,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
               ),
             ],
           ),
