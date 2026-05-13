@@ -99,6 +99,44 @@ void main() {
   });
 
   testWidgets(
+      r'status pill tap (§2h): toast reads "Device $id is Failed" when no '
+      'custom name is set', (tester) async {
+    await _pump(
+      tester,
+      FailedDeviceCard(
+        device: _device('AA:BB:CC'),
+        error: StateError('boom'),
+        onRetry: () {},
+        onRemove: () {},
+      ),
+    );
+    await tester.tap(find.text('Failed'));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('Device AA:BB:CC is Failed'), findsOneWidget);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+      'status pill tap (§2h): toast includes the custom name in parens '
+      'when set', (tester) async {
+    await _pump(
+      tester,
+      FailedDeviceCard(
+        device: _device('AA:BB:CC'),
+        error: StateError('boom'),
+        onRetry: () {},
+        onRemove: () {},
+        displayName: 'Left',
+        customName: 'Left',
+      ),
+    );
+    await tester.tap(find.text('Failed'));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('Device AA:BB:CC (Left) is Failed'), findsOneWidget);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets(
       'rename flow (§2e): tap the name → dialog → OK fires onRename '
       'with the entered string', (tester) async {
     final renames = <String>[];

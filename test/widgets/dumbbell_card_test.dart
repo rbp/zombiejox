@@ -274,8 +274,8 @@ void main() {
 
     // 40 chars, with embedded newlines. After formatters: newlines
     // stripped, then truncated to 32 chars.
-    await tester
-        .enterText(find.byType(TextField), 'one\ntwo\nthree-four-five-six-seven-eight-nine');
+    await tester.enterText(find.byType(TextField),
+        'one\ntwo\nthree-four-five-six-seven-eight-nine');
     await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
 
@@ -453,6 +453,92 @@ void main() {
         reason: 'known weight must still show in disconnected fallback');
     expect(find.byIcon(Icons.bluetooth_searching), findsNothing,
         reason: 'activity glyph only when state==null');
+  });
+
+  testWidgets(
+      r'status pill tap (§2h): toast reads "Device $id is $state" when no '
+      'custom name is set', (tester) async {
+    final fake = _FakeDumbbell(_device('AA:BB:CC'));
+    addTearDown(fake.dispose);
+
+    await _pump(tester,
+        DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs, onRemove: () {}));
+    fake.emitConnected();
+    fake.emitState(
+      const DumbbellState(weightIndex: 2, motorActive: false, batteryPct: 80),
+    );
+    await tester.pump();
+    // Tap the status pill (the chip label "Connected" is unique within
+    // the card — the body text is "Idle").
+    await tester.tap(find.text('Connected'));
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('Device AA:BB:CC is Connected'), findsOneWidget,
+        reason: 'no custom name ⇒ toast omits the parenthesised name');
+    // Drain the auto-dismiss so the test exits cleanly.
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+      r'status pill tap (§2h): toast reads "Device $id ($customName) is '
+      r'$state" when a custom name is set', (tester) async {
+    final fake = _FakeDumbbell(_device('AA:BB:CC', name: 'DB200-01'));
+    addTearDown(fake.dispose);
+
+    await _pump(
+      tester,
+      DumbbellCard(
+        dumbbell: fake,
+        unit: WeightUnit.lbs,
+        onRemove: () {},
+        displayName: 'Left',
+        customName: 'Left',
+      ),
+    );
+    fake.emitConnected();
+    fake.emitState(
+      const DumbbellState(weightIndex: 2, motorActive: false, batteryPct: 80),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('Connected'));
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('Device AA:BB:CC (Left) is Connected'), findsOneWidget);
+    // Advertised name "DB200-01" must NOT appear in the toast — only
+    // the user-set custom name annotates the message.
+    expect(find.text('Device AA:BB:CC (DB200-01) is Connected'), findsNothing,
+        reason: r'§2h: advertised name is not the source of $displayName');
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+      'status pill tap (§2h): toast text mirrors the current state — '
+      '"Moving" while motorActive, "Reconnecting" while a retry is pending',
+      (tester) async {
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+
+    await _pump(
+      tester,
+      DumbbellCard(
+        dumbbell: fake,
+        unit: WeightUnit.lbs,
+        onRemove: () {},
+        retryState: const RetryState(phase: RetryPhase.waiting, attempt: 1),
+      ),
+    );
+    fake.emitConnected();
+    fake.emitState(
+      const DumbbellState(weightIndex: 2, motorActive: false, batteryPct: 80),
+    );
+    fake.emitDisconnected();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Reconnecting'));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('Device AA:01 is Reconnecting'), findsOneWidget);
+    await tester.pumpAndSettle();
   });
 
   testWidgets(

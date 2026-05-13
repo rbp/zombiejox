@@ -6,6 +6,7 @@ import '../devices/weight_group.dart' show RetryState;
 import '../protocol/dumbbell_state.dart';
 import '../state/weights.dart';
 import 'rename_device_dialog.dart';
+import 'status_toast.dart';
 
 /// Per-device status card. Subscribes to a single [Dumbbell]'s connection +
 /// state streams; renders name, status chip, current weight, motor state,
@@ -31,11 +32,21 @@ class DumbbellCard extends StatelessWidget {
   /// motor active, or — fallback — a drop with no supervisor).
   final RetryState? retryState;
 
-  /// User-chosen display name override (§2e). When null, the card
-  /// falls back to `dumbbell.device.displayName`. HomeScreen passes
-  /// the value resolved through [SelectionModel.displayNameFor] so a
-  /// renamed dumbbell shows the user's name on the card.
+  /// Resolved name to render in the card body — custom name when the
+  /// user has set one, else the advertised name / id fallback.
+  /// HomeScreen passes the value resolved through
+  /// [SelectionModel.displayNameFor]. Distinct from [customName], which
+  /// is "user-set name only, null otherwise" — the §2h status toast uses
+  /// the latter to decide whether to include "(name)" in the message.
   final String? displayName;
+
+  /// User-set custom name (§2e), or `null` if the user hasn't renamed
+  /// this dumbbell. Used by the §2h status-pill toast: when non-null
+  /// the toast reads "Device $id ($customName) is $state", otherwise
+  /// "Device $id is $state". Distinct from [displayName] (which falls
+  /// back to the advertised name) — we only annotate with the user's
+  /// own label, never the advertised one.
+  final String? customName;
 
   /// User tapped the name region to commit a rename. Receives the
   /// raw input string (caller is responsible for trim / empty
@@ -52,6 +63,7 @@ class DumbbellCard extends StatelessWidget {
     required this.onRemove,
     this.retryState,
     this.displayName,
+    this.customName,
     this.onRename,
   });
 
@@ -68,6 +80,8 @@ class DumbbellCard extends StatelessWidget {
             final state = stateSnap.data;
             return _Card(
               name: name,
+              deviceId: dumbbell.device.id,
+              customName: customName,
               connState: connSnap.data,
               state: state,
               unit: unit,
@@ -84,6 +98,8 @@ class DumbbellCard extends StatelessWidget {
 
 class _Card extends StatelessWidget {
   final String name;
+  final String deviceId;
+  final String? customName;
   final BleConnectionState? connState;
   final DumbbellState? state;
   final WeightUnit unit;
@@ -93,6 +109,8 @@ class _Card extends StatelessWidget {
 
   const _Card({
     required this.name,
+    required this.deviceId,
+    required this.customName,
     required this.connState,
     required this.state,
     required this.unit,
@@ -104,10 +122,19 @@ class _Card extends StatelessWidget {
   Future<void> _handleRenameTap(BuildContext context) async {
     final cb = onRename;
     if (cb == null) return;
-    final result =
-        await showRenameDeviceDialog(context, initialName: name);
+    final result = await showRenameDeviceDialog(context, initialName: name);
     if (result == null) return;
     cb(result);
+  }
+
+  /// §2h: the user tapped the (potentially truncated) status pill —
+  /// surface the full state plus the device id. Includes "(customName)"
+  /// only when the user has renamed the dumbbell; never the advertised
+  /// name (per spec — the id already disambiguates).
+  void _handleStatusTap(BuildContext context, String statusLabel) {
+    final namePart =
+        (customName != null && customName!.isNotEmpty) ? ' ($customName)' : '';
+    showStatusToast(context, 'Device $deviceId$namePart is $statusLabel');
   }
 
   @override
@@ -223,7 +250,20 @@ class _Card extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            _StatusChip(label: statusLabel, color: statusColor),
+            // §2h: chip is tappable so a user who sees a truncated
+            // "Conne…" label can pull up the full message. The
+            // GestureDetector wraps only the chip so the rest of the
+            // row keeps its existing tap targets (name → rename, ×
+            // → remove). `behavior: opaque` so the chip's padding
+            // also picks up taps, not just the rendered pill. Keyed
+            // so widget tests can target the tap region directly
+            // (chip *label* depends on a still-pending state stream).
+            GestureDetector(
+              key: const ValueKey('status-chip-tap'),
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _handleStatusTap(context, statusLabel),
+              child: _StatusChip(label: statusLabel, color: statusColor),
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(

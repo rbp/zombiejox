@@ -1,6 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback, PlatformException;
 import 'package:permission_handler/permission_handler.dart';
@@ -74,8 +75,10 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  late final BleScanner _scanner = widget.scanner ?? const FlutterBluePlusScanner();
-  late final WeightGroup _group = widget.createWeightGroup?.call() ?? WeightGroup();
+  late final BleScanner _scanner =
+      widget.scanner ?? const FlutterBluePlusScanner();
+  late final WeightGroup _group =
+      widget.createWeightGroup?.call() ?? WeightGroup();
   late final UnitAutoMatcher _autoMatcher = UnitAutoMatcher(
     preferences: widget.preferences,
     onOutcome: _onAutoMatchOutcome,
@@ -162,7 +165,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _recheckPermissions() async {
     final bool granted;
     try {
-      granted = await (widget.checkPermissionsGranted ?? _defaultCheckPermissionsGranted)();
+      granted = await (widget.checkPermissionsGranted ??
+          _defaultCheckPermissionsGranted)();
     } on PlatformException catch (e, st) {
       // Narrow catch: a flaky platform channel on resume shouldn't
       // tear the screen down, but a Dart-side bug (e.g. a test
@@ -290,12 +294,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case AutoMatchOutcome.matched:
         final label = result.unit == WeightUnit.lbs ? 'lbs' : 'kg';
         messenger.showSnackBar(
-          SnackBar(content: Text('Unit set to $label to match your dumbbells.')),
+          SnackBar(
+              content: Text('Unit set to $label to match your dumbbells.')),
         );
       case AutoMatchOutcome.disagreement:
         messenger.showSnackBar(
           const SnackBar(
-            content: Text('Dumbbells are set to different units — pick one in Settings'),
+            content: Text(
+                'Dumbbells are set to different units — pick one in Settings'),
           ),
         );
     }
@@ -425,7 +431,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             onPressed: () => unawaited(
               Navigator.of(context).push<void>(
                 MaterialPageRoute<void>(
-                  builder: (_) => SettingsScreen(preferences: widget.preferences),
+                  builder: (_) =>
+                      SettingsScreen(preferences: widget.preferences),
                 ),
               ),
             ),
@@ -444,6 +451,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               unit: unit,
               selectedDevices: _selection.devices,
               displayNameFor: _selection.displayNameFor,
+              customNameFor: _selection.customNameFor,
               scanner: _scanner,
               adapterState: _adapter,
               scanFilter: isJaxJoxLiveDeviceName,
@@ -487,6 +495,11 @@ class _Body extends StatelessWidget {
   /// list agree on the same name. (§2e)
   final String Function(DeviceRef) displayNameFor;
 
+  /// Just the user-set custom name (null if the user hasn't renamed the
+  /// dumbbell). Drives the §2h status-pill toast on the cards — distinct
+  /// from [displayNameFor], which always returns a non-null fallback.
+  final String? Function(DeviceRef) customNameFor;
+
   final BleScanner scanner;
   final BleAdapterState adapterState;
   final bool Function(String name) scanFilter;
@@ -514,6 +527,7 @@ class _Body extends StatelessWidget {
     required this.unit,
     required this.selectedDevices,
     required this.displayNameFor,
+    required this.customNameFor,
     required this.scanner,
     required this.adapterState,
     required this.scanFilter,
@@ -534,6 +548,7 @@ class _Body extends StatelessWidget {
   ) {
     final dumbbell = dumbbellByDevice[device];
     final name = displayNameFor(device);
+    final custom = customNameFor(device);
     if (dumbbell != null) {
       return DumbbellCard(
         key: ValueKey('connected-${device.id}'),
@@ -542,6 +557,7 @@ class _Body extends StatelessWidget {
         onRemove: () => onRemove(device),
         retryState: snapshot.retryStates[device],
         displayName: name,
+        customName: custom,
         onRename: (newName) => onRename(device, newName),
       );
     }
@@ -554,6 +570,7 @@ class _Body extends StatelessWidget {
         onRetry: () => onRetry(device),
         onRemove: () => onRemove(device),
         displayName: name,
+        customName: custom,
         onRename: (newName) => onRename(device, newName),
       );
     }
@@ -588,7 +605,8 @@ class _Body extends StatelessWidget {
         AnimatedSwitcher(
           key: ValueKey('slot-${device.id}'),
           duration: const Duration(milliseconds: 250),
-          transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
+          transitionBuilder: (child, anim) =>
+              FadeTransition(opacity: anim, child: child),
           child: _cardFor(device, dumbbellByDevice),
         ),
     ];
@@ -699,7 +717,9 @@ class _Body extends StatelessWidget {
                   builder: (context, snap) {
                     final selectedSet = selectedDevices.toSet();
                     final results = (snap.data ?? const <ScanHit>[])
-                        .where((r) => scanFilter(r.device.name) && !selectedSet.contains(r.device))
+                        .where((r) =>
+                            scanFilter(r.device.name) &&
+                            !selectedSet.contains(r.device))
                         .toList();
                     return _ScanResults(
                       results: results,
@@ -831,7 +851,8 @@ class ScanResultCard extends StatelessWidget {
                     Text(
                       'RSSI ${hit.rssi}',
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
+                        color: theme.textTheme.bodySmall?.color
+                            ?.withValues(alpha: 0.6),
                       ),
                     ),
                   ],
