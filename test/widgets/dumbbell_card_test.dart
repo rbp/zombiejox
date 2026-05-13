@@ -135,4 +135,34 @@ void main() {
 
     expect(find.text('AA:BB:CC'), findsOneWidget);
   });
+
+  testWidgets('onRemove absent → no × icon rendered', (tester) async {
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+
+    await _pump(tester, DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs));
+    await tester.pump();
+    expect(find.byIcon(Icons.close), findsNothing);
+  });
+
+  testWidgets(
+      'onRemove present → × icon renders and tap fires the callback',
+      (tester) async {
+    var removes = 0;
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+
+    await _pump(
+      tester,
+      DumbbellCard(
+        dumbbell: fake,
+        unit: WeightUnit.lbs,
+        onRemove: () => removes++,
+      ),
+    );
+    await tester.pump();
+    expect(find.byIcon(Icons.close), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.close));
+    expect(removes, 1);
+  });
 }

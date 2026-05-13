@@ -3,7 +3,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../state/permission_request_flow.dart';
 import '../state/preferences.dart';
-import 'scan_screen.dart';
+import 'home_screen.dart';
 
 /// Pre-permission rationale shown before the OS Bluetooth
 /// prompt fires. Critical on iOS where a denied prompt cannot be re-prompted
@@ -11,7 +11,7 @@ import 'scan_screen.dart';
 /// "why" first, we improve the chance the user grants on the first try.
 ///
 /// This is also the single source of truth for re-grant flows: if the user
-/// later revokes permission via Settings.app, [ScanScreen] detects the loss
+/// later revokes permission via Settings.app, [HomeScreen] detects the loss
 /// and `pushReplacement`'s back here rather than handling it inline. Keeping
 /// the rationale + denied + "Open Settings" UI in one place avoids drift.
 ///
@@ -26,10 +26,11 @@ class PermissionScreen extends StatefulWidget {
   /// the screen calls [_defaultRequestPermissions].
   final Future<bool> Function()? requestPermissions;
 
-  /// Override the "permissions granted, move on" navigation — used by widget
-  /// tests so we don't actually push a `ScanScreen` (whose own `initState`
-  /// would hit the platform channel). In production this is null and the
-  /// screen calls [_defaultOnGranted] which `pushReplacement`'s to scan.
+  /// Override the "permissions granted, move on" navigation — used by
+  /// widget tests so we don't actually push a `HomeScreen` (whose own
+  /// `initState` would hit the platform channel). In production this is
+  /// null and the screen calls [_defaultOnGranted] which
+  /// `pushReplacement`'s to home.
   final void Function(BuildContext)? onGranted;
 
   const PermissionScreen({
@@ -56,7 +57,7 @@ class PermissionScreen extends StatefulWidget {
   void _defaultOnGranted(BuildContext context) {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => ScanScreen(preferences: preferences),
+        builder: (_) => HomeScreen(preferences: preferences),
       ),
     );
   }

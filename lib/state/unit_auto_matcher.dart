@@ -47,7 +47,7 @@ typedef UnitsSnapshot = ({
 
 /// Decides — with no UI dependencies — whether to nudge the app's
 /// display unit to match the connected dumbbells'. Lifted out of
-/// `ControlScreen` so the state machine is testable as a plain Dart
+/// `HomeScreen` so the state machine is testable as a plain Dart
 /// class.
 ///
 /// **Rules:**

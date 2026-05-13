@@ -19,7 +19,7 @@ class ScanHit {
 /// Implementations:
 ///   - [FlutterBluePlusScanner] — production adapter backed by
 ///     `FlutterBluePlus` statics.
-///   - Tests can pass a fake to [ScanScreen] when they want to assert on
+///   - Tests can pass a fake to `HomeScreen` when they want to assert on
 ///     the scan UI without invoking the platform channel.
 abstract class BleScanner {
   /// Synchronous current scanning state.

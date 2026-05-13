@@ -32,7 +32,7 @@ class Dumbbell {
   /// clears it. The alternative (fabricating a synthetic `DumbbellState`
   /// from a battery byte alone) would flip [isReady] true before any
   /// unit byte has been observed, which downstream auto-match logic
-  /// (`UnitAutoMatcher` via `ControlScreen`) would then have to work
+  /// (`UnitAutoMatcher` via `HomeScreen`) would then have to work
   /// around. Keep the asymmetry here, not in the consumer.
   int? _pendingBatteryPct;
 

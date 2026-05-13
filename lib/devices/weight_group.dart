@@ -9,11 +9,11 @@ import 'dumbbell.dart';
 ///
 /// `WeightGroup` recomputes and emits a fresh [GroupSnapshot] on every
 /// event that could change one of these fields (member added, member's
-/// state stream emitted a new value, connect failed, retry succeeded).
-/// Consumers (today, just `ControlScreen`) subscribe once and render as
-/// a pure function of the snapshot — no per-screen derivation, no
-/// per-dumbbell stream subscriptions, no separate "failed devices"
-/// bookkeeping on the view side.
+/// state stream emitted a new value, connect failed, retry succeeded,
+/// member removed). Consumers (today, just `HomeScreen`) subscribe
+/// once and render as a pure function of the snapshot — no per-screen
+/// derivation, no per-dumbbell stream subscriptions, no separate
+/// "failed devices" bookkeeping on the view side.
 class GroupSnapshot {
   /// Members the group has accepted via [WeightGroup.add] and that have
   /// not (yet) failed to connect. Includes both still-connecting and
@@ -82,7 +82,7 @@ class GroupSnapshot {
 /// The group owns the full per-member state: it subscribes to each
 /// member's [Dumbbell.states] stream, dedupes no-op `0xD2` broadcasts,
 /// and emits a [GroupSnapshot] whenever something a consumer might
-/// render off of changes. Consumers (today, `ControlScreen`) subscribe
+/// render off of changes. Consumers (today, `HomeScreen`) subscribe
 /// once to [snapshots] and render as a function of the snapshot — they
 /// don't manage their own state subscriptions, don't track failures
 /// separately, and don't recompute consensus / motor / unit derivations
@@ -183,6 +183,19 @@ class WeightGroup {
         } catch (_) {/* best-effort */}
         return;
       }
+      // [remove] race: the user may have cancelled this particular
+      // device's slot while connect() was awaiting (tap × on the
+      // connecting card). [remove] cancelled the state subscription
+      // and dropped this dumbbell from `_dumbbells`. Re-populating
+      // `_failed` here would resurrect a slot the consumer has
+      // explicitly dismissed. Use `_stateSubs` as the "consumer still
+      // cares" probe — both `remove` and `disconnectAll` clear it.
+      if (!_stateSubs.containsKey(db)) {
+        try {
+          await db.disconnect();
+        } catch (_) {/* best-effort */}
+        return;
+      }
       _dumbbells.remove(db);
       _failed[device] = e;
       _lastSeen.remove(db);
@@ -203,6 +216,48 @@ class WeightGroup {
       // per failed click.
       try {
         await db.disconnect();
+      } catch (_) {/* best-effort */}
+    }
+  }
+
+  /// Drop a single device from the group. If the device is in
+  /// [GroupSnapshot.connected], its [Dumbbell.disconnect] is invoked and
+  /// it's removed from the membership. If it's in
+  /// [GroupSnapshot.failed], the entry is cleared. Either way, a fresh
+  /// snapshot is emitted before the (potentially slow) disconnect call
+  /// completes — consumers see the slot disappear immediately, so a
+  /// tap-to-remove feels instant.
+  ///
+  /// Idempotent against a device that's neither connected nor failed
+  /// (silent no-op). Safe to call against a device whose connect is
+  /// still in flight — the racing connect's catch block uses
+  /// `_stateSubs.containsKey` as a "consumer still cares" probe and
+  /// will skip the failure-snapshot population.
+  ///
+  /// No-op if the group is already disposed.
+  Future<void> remove(DeviceRef device) async {
+    if (_disposed) return;
+    final hadFailed = _failed.remove(device) != null;
+    Dumbbell? matched;
+    for (final d in _dumbbells) {
+      if (d.device == device) {
+        matched = d;
+        break;
+      }
+    }
+    if (matched != null) {
+      _dumbbells.remove(matched);
+      _lastSeen.remove(matched);
+      // Cancel the state sub synchronously before emitting so the next
+      // snapshot really is the post-remove state. The cancel future
+      // itself is best-effort.
+      unawaited(_stateSubs.remove(matched)?.cancel() ?? Future.value());
+    }
+    if (matched == null && !hadFailed) return;
+    _emit();
+    if (matched != null) {
+      try {
+        await matched.disconnect();
       } catch (_) {/* best-effort */}
     }
   }
