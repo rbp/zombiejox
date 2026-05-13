@@ -99,9 +99,12 @@ class _PermissionScreenState extends State<PermissionScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: ValueListenableBuilder<PermissionFlowState>(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: ValueListenableBuilder<PermissionFlowState>(
             valueListenable: _flow.state,
             builder: (context, state, _) {
               final denied = state == PermissionFlowState.denied;
@@ -161,6 +164,8 @@ class _PermissionScreenState extends State<PermissionScreen> {
                 ],
               );
             },
+              ),
+            ),
           ),
         ),
       ),

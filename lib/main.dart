@@ -4,6 +4,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'screens/permission_screen.dart';
 import 'screens/scan_screen.dart';
 import 'state/preferences.dart';
+import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -51,10 +52,7 @@ class ZombieJoxApp extends StatelessWidget {
 
     return MaterialApp(
       title: 'ZombieJox',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.darkTheme(),
       home: home,
     );
   }

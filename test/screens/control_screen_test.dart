@@ -11,7 +11,9 @@ import 'package:zombiejox/protocol/dumbbell_state.dart';
 import 'package:zombiejox/screens/control_screen.dart';
 import 'package:zombiejox/state/preferences.dart';
 import 'package:zombiejox/state/weights.dart';
+import 'package:zombiejox/widgets/dumbbell_card.dart';
 import 'package:zombiejox/widgets/failed_device_card.dart';
+import 'package:zombiejox/widgets/weight_button.dart';
 
 /// Connects-instantly fake; lets the test push state values for assertions.
 class _FakeDumbbell extends Dumbbell {
@@ -99,7 +101,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.byType(Card), findsNWidgets(2));
+    expect(find.byType(DumbbellCard), findsNWidgets(2));
   });
 
   testWidgets('weight button tap fans out to every dumbbell', (tester) async {
@@ -162,7 +164,7 @@ void main() {
     // No fake has emitted state yet — every weight button is disabled so a
     // fast tap can't hit an uninitialized TX characteristic.
     var allButtons =
-        tester.widgetList<FilledButton>(find.byType(FilledButton)).toList();
+        tester.widgetList<WeightButton>(find.byType(WeightButton)).toList();
     expect(allButtons, hasLength(8));
     for (final b in allButtons) {
       expect(b.onPressed, isNull,
@@ -186,7 +188,7 @@ void main() {
     // Buttons must enable now — we don't want one offline dumbbell to block
     // the user from controlling the one that's actually working.
     allButtons =
-        tester.widgetList<FilledButton>(find.byType(FilledButton)).toList();
+        tester.widgetList<WeightButton>(find.byType(WeightButton)).toList();
     final enabledCount = allButtons.where((b) => b.onPressed != null).length;
     expect(enabledCount, 8,
         reason: 'one ready ⇒ buttons enabled; offline mate ignored');

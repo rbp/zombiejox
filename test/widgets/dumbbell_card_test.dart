@@ -59,7 +59,10 @@ void main() {
     await _pump(tester, DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs));
     await tester.pump();
 
-    expect(find.textContaining('Connecting'), findsOneWidget);
+    // Body line spells the state out with an ellipsis; the status chip
+    // shows the bare word. `find.text` is exact-match so this only
+    // matches the body line, not the chip.
+    expect(find.text('Connecting…'), findsOneWidget);
   });
 
   testWidgets('renders weight in lbs once connected and state arrives',
@@ -104,7 +107,9 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.textContaining('Moving'), findsOneWidget);
+    // Body line is "Moving…"; chip is "Moving". Exact-match `find.text`
+    // on the body keeps the assertion specific.
+    expect(find.text('Moving…'), findsOneWidget);
     expect(find.text('Idle'), findsNothing);
   });
 

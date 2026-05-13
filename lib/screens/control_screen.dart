@@ -168,12 +168,19 @@ class _ControlScreenState extends State<ControlScreen> {
       // weight button on this screen without a navigation round-trip.
       body: ValueListenableBuilder<WeightUnit>(
         valueListenable: widget.preferences.unit,
-        builder: (context, unit, _) => _Body(
-          orderedDevices: widget.devices,
-          snapshot: _snapshot,
-          unit: unit,
-          onSelectIndex: _onSelectIndex,
-          onRetry: _addOne,
+        builder: (context, unit, _) => Center(
+          // 600 dp cap so cards and the weight grid don't stretch absurdly
+          // wide on tablets / landscape. Phones are unaffected.
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: _Body(
+              orderedDevices: widget.devices,
+              snapshot: _snapshot,
+              unit: unit,
+              onSelectIndex: _onSelectIndex,
+              onRetry: _addOne,
+            ),
+          ),
         ),
       ),
     );
@@ -297,19 +304,24 @@ class _Body extends StatelessWidget {
             const SizedBox(height: 8),
             Expanded(
               flex: 3,
-              child: GridView.count(
-                crossAxisCount: 4,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                children: [
-                  for (int i = 0; i < kJaxJoxWeightCount; i++)
-                    WeightButton(
-                      index: i,
-                      unit: unit,
-                      selected: selected == i,
-                      onPressed: canPress ? () => onSelectIndex(i) : null,
-                    ),
-                ],
+              // SliverGridDelegateWithMaxCrossAxisExtent lets each cell
+              // grow horizontally (fewer columns on narrow screens, more
+              // on wide ones) and pairs with WeightButton's FittedBox so
+              // labels survive TextScaler up to ~2× without clipping.
+              child: GridView.builder(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 140,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 1.6,
+                ),
+                itemCount: kJaxJoxWeightCount,
+                itemBuilder: (_, i) => WeightButton(
+                  index: i,
+                  unit: unit,
+                  selected: selected == i,
+                  onPressed: canPress ? () => onSelectIndex(i) : null,
+                ),
               ),
             ),
           ],
