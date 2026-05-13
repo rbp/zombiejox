@@ -231,7 +231,18 @@ Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case harde
 - Smooth motion-state animations on weight buttons
 - Better empty / loading / error states
 
-### 2c. About screen improvements
+### 2c. About screen improvements — ✅ done
+
+Restructured the About screen per the spec below:
+
+- Logo (`assets/icon-1024.png`, the cream-background launcher icon, clipped to a rounded rectangle) above the app name + tagline.
+- "What it is" pitch unchanged.
+- Two new tappable rows below it: a GitHub link (`github.com/rbp/zombiejox`) and a "Rodrigo Pimentel \<rbp@isnomore.net\> started this project." row. Both launch the OS handler via `url_launcher` (new dependency); a failing launch surfaces a SnackBar rather than an uncaught error.
+- Existing Credits / Protocol / License / Disclaimer sections kept verbatim.
+
+Test seam: `AboutScreen.launchUri` accepts a `Future<bool> Function(Uri)` override so widget tests can assert on the URIs without hitting the `url_launcher` platform channel.
+
+Original notes (kept for reference):
 
 - It should have the logo at the top. Either the app name and below it, the logo; or the other way round.
 - Below "what it is", a link back to the app's Github page
@@ -331,7 +342,7 @@ i.e., asymmetric setting, gated behind a Settings toggle
 
 1. ✅ Phase 0 reverse-engineering (0a–0e done; 0f closed via static analysis — no HCI snoop needed)
 2. 🟡 Phase 1 — Flutter MVP — PRs merged: #1, #2, #3, #7, #8, #10, #14–#20; only edge-case screens (§1h) outstanding.
-3. 🟡 Phase 2 — UX and UI improvements. §2d Design v1 shipped via #19 + #20. Still pending: §2a (state-stream robustness), §2b (UX polish), §2c (About screen improvements), §2e (rename dumbbells), §2f (per-device weight override).
+3. 🟡 Phase 2 — UX and UI improvements. §2c About screen + §2d Design v1 shipped. Still pending: §2a (state-stream robustness), §2b (UX polish), §2e (rename dumbbells), §2f (per-device weight override).
 4. ⏳ Phase 3 — Testing & distribution
 
 ---
