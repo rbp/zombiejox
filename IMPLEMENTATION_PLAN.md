@@ -200,7 +200,7 @@ Edge-case states (§1h):
 
 ✅ Done: `shared_preferences`; `state/weights.dart` (incl. `weightUnitFromRawByte`); reactive `state/preferences.dart` (units + remembered device IDs + explicit-choice flag); `state/{permission_request_flow,unit_auto_matcher}.dart`; `devices/{dumbbell,weight_group}.dart` (with `GroupSnapshot` + `remove()`); `widgets/{weight_button,dumbbell_card,failed_device_card}.dart` (incl. disconnect-aware status); `theme/app_theme.dart`; `screens/{home,permission,settings,about}_screen.dart`; promote-on-tap selection on the joint Home screen; per-card "×" remove; Settings/About reachable via gear icon; warm-start auto-reconnect to remembered dumbbells (seeds the top region in `connecting` state on the first frame); auto-match-from-dock on first connect; `0xD1` byte-8 unit parsing with on-device-confirmed mapping; custom launcher icon + splash; edge-case states (BT off banner with Open Settings, permission-revoked-on-resume re-route to PermissionScreen, scan-empty hint with "Scan again", `DumbbellCard` "Disconnected" state for mid-session drops); new `BleScanner.adapterState` port surface backed by `FlutterBluePlus.adapterState`.
 
-### 1i. Out of scope for MVP (deferred)
+### Out of scope for MVP (deferred)
 
 - Per-dumbbell weight override (asymmetric warmup) — Phase 2+
 - History sync (`0xD3` / `0xD4`)
@@ -221,7 +221,7 @@ Edge-case states (§1h):
 
 Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case hardening, and visual polish. Not a separate implementation pass — incremental work on top of Phase 1.
 
-Shipped so far: §2a (state-stream robustness — auto-reconnect on drop + resume kick), §2b (UX polish — animations + haptic + reconnect-failure SnackBar + activity glyph), §2c (About screen restructure), §2d (Design v1). Outstanding: §2e (rename dumbbells), §2f (per-device weight override), §2g (pull-down to refresh).
+Shipped so far: §2a (state-stream robustness — auto-reconnect on drop + resume kick), §2b (UX polish — animations + haptic + reconnect-failure SnackBar + activity glyph), §2c (About screen restructure), §2d (Design v1), §2e (rename dumbbells — `SelectionModel` extracted in same PR). Outstanding: §2f (per-device weight override), §2g (pull-down to refresh).
 
 ### ADR-001 — four sources of truth in the running app
 
@@ -230,13 +230,13 @@ Recorded post-Phase-1 multi-agent code review (Round 2). The app keeps four stat
 1. **Transport state** — per-device BLE connection liveness, owned by `BleTransport` (production: `BleConnection`) inside `Dumbbell`. Surfaced to callers via `Dumbbell.connectionState` (`Stream<BleConnectionState>`).
 2. **Protocol state** — the last parsed `DumbbellState` per device (weight index, motor active, battery, unit byte), owned by `Dumbbell.lastState` and emitted via `Dumbbell.states`.
 3. **Group snapshot** — the projected `GroupSnapshot` (membership, failed map, consensus, motor, units), owned by `WeightGroup` and emitted on `WeightGroup.snapshots`. Computed inside `_computeSnapshot`; consumers don't recompute.
-4. **User intent** — the user's *selected* device list (today: `HomeScreen._selectedDevices`; planned: extracted into a `SelectionModel` under `lib/state/` when §2e rename + §2f per-device override land, because they're per-`DeviceRef` user-owned metadata in the same lifecycle).
+4. **User intent** — the user's *selected* device list plus per-device user-owned metadata (custom display name from §2e; planned per-device weight override from §2f). Owned by `SelectionModel` in `lib/state/selection_model.dart`; `HomeScreen` subscribes via `ChangeNotifier` and never holds its own selection list. The model hydrates from `Preferences` (rememberedDeviceIds + customDeviceNames) on construction, notifies on every mutation (add / remove / rename), and persists: custom names every change; remembered ids only after `markVerified()` flips true (HomeScreen calls it on the first ready snapshot) so a connect that never reaches `isReady` cannot poison the warm-start anchor.
 
 **Consequences:**
 
 - The `BleTransport` port is now bound by `Dumbbell`'s constructor *with* a test seam: `Dumbbell(this.device, {BleTransport Function(DeviceRef)? transportFactory})`. §2a's reconnect path swaps `_ble` internally for a fresh transport (`_transportFactory(device)`) after a drop, so `_ble` is non-final. The seam was originally deferred per the "no second transport yet" rule, but §2a's `connectionState` proxy (latest-state cache + per-listener `Stream.multi`) needs end-to-end testability that the subclass-and-override pattern can't provide — the proxy logic lives inside `Dumbbell` itself, not in any method a subclass overrides. The pre-existing `FakeDumbbell` (subclass + override) pattern remains the right choice when the test doesn't care about the proxy's internals.
 - `DumbbellCard` currently subscribes to (1) and (2) separately and re-derives connection / motor labels. This is the one remaining place where a screen-side widget computes derived state that could live on (3). §2a added a `retryState: RetryState?` prop wired from `GroupSnapshot.retryStates[device]` — that's one more piece of derived state pushed onto the snapshot, but the card still owns the `connState`/`state` subscriptions. The intended fix is to extend `GroupSnapshot` with a per-`DeviceRef` view-model so the card becomes a pure `Stateless` projection over a single value object. Tracked as Phase 2 cleanup.
-- Adding "rename" or "per-device weight override" without first extracting (4) into `lib/state/` will push `HomeScreen` past the junction-box threshold. Don't.
+- (Historical, resolved in §2e:) Adding "rename" or "per-device weight override" without first extracting (4) into `lib/state/` would push `HomeScreen` past the junction-box threshold. §2e extracted `SelectionModel`; §2f's per-device weight override now lands on top of the same model.
 
 ### 2a. State-stream robustness — ✅ done
 
@@ -331,9 +331,18 @@ The app should work:
 
 The small "stop" / "retry" button on top-right of the scan screen is confusing - especially the "stop" button, which is simply a filled square that looks like an asset is missing. It should have a circle around it, like https://fontawesome.com/icons/duotone/solid/circle-stop
 
-### 2e. Allow user to change the display name of dumbbells
+### 2e. Allow user to change the display name of dumbbells — ✅ done
 
-Currently, the name displayed is the device's uid, and is what shows up across the Home screen (top region cards and the bottom scan list). A simple approach is: when the user taps on the portion of the dumbbell card containing the display name (currently, the UUID), a pop-up with a single input field is displayed, prompting the user to rename the dumbbells. If the user then taps "ok", we store and always use that name for that dumbbell. If they tap "cancel", nothing is changed.
+Shipped in one PR alongside the `SelectionModel` extraction promised in ADR-001.
+
+**What works:**
+
+- **Tap-to-rename on every card.** Tapping the name region on a `DumbbellCard` *or* a `FailedDeviceCard` opens an `AlertDialog` with a single `TextField` pre-populated with the current display name. OK commits; Cancel does nothing. The dialog is implemented as a small `StatefulWidget` (`_RenameDialog`) so the `TextEditingController` is owned by the framework and disposed in `State.dispose()` — the earlier "controller created before `showDialog`, disposed in a `finally`" shape tripped widget-test focus-traversal panics on pop, see `lib/widgets/rename_device_dialog.dart`.
+- **`SelectionModel` (ADR-001 §4 extraction).** `lib/state/selection_model.dart` owns the ordered selected-device list and the per-device custom names. `HomeScreen` no longer holds a `_selectedDevices` list; it instantiates a `SelectionModel`, subscribes via `ChangeNotifier`, and reads `model.devices` / `model.displayNameFor(device)` on every build. The model hydrates from `Preferences.rememberedDeviceIds` + `Preferences.customDeviceNames` in its constructor. Mutations: `add(device)`, `remove(device)`, `rename(device, name)`; `markVerified()` is a latch that HomeScreen flips on the first ready snapshot so remembered-id persistence still waits for a verified connect (a Connect that never reaches `isReady` cannot poison the warm-start anchor, matching the pre-extraction behavior).
+- **Custom-name persistence.** `Preferences.customDeviceNames: Map<String, String>` is a JSON-encoded blob under one prefs key. Replace-don't-merge semantics, mirroring `setRememberedDeviceIds`. A malformed payload on disk is treated as empty rather than throwing — the user's fitness app shouldn't refuse to start because one preference is junk. Renames persist *immediately* (every change), independent of the verified-set latch, because the user typed it — there's no reason to wait for a successful connect to honor their intent.
+- **Cross-list consistency.** `SelectionModel.displayNameFor(device)` is the single resolver used by the top-region cards AND the bottom scan list. For a device in the selection it reads the entry's `customName`; for a device NOT in the selection it falls back to `_preferences.customDeviceNames[device.id]` so a previously-renamed dumbbell that's been removed (or hasn't been promoted yet on a fresh launch) still renders with the user's name in the scan list. Last-resort fallback is `DeviceRef.displayName` (advertised name → raw id).
+- **Rename-preservation on remove.** Removing a renamed dumbbell from the selection does NOT wipe its rename — `_persistCustomNames` merges the still-on-disk entries for non-selected devices. Re-promoting later restores the name.
+- **Normalization in one place.** `SelectionModel.rename(device, name)` trims surrounding whitespace; a `null` or whitespace-only argument clears the custom name (falls back to advertised / id). The dialog returns the raw user input unmodified — the model is the single normalization point so callers (HomeScreen + tests) can't accidentally diverge.
 
 ### 2f. Per-device weight override
 i.e., asymmetric setting, gated behind a Settings toggle
@@ -345,6 +354,8 @@ Pulling down from the main screen refreshes: re-fetches the weights of connected
 ### 2h. Tapping the bluetooth status pill
 
 The bluetooth status pill may be truncated (e.g., "Conne..."). If the user taps that side of the dumbbell card, the app should display a message for a few seconds, saying "Device $UUID ($displayName) is $state" where ($displayName) is only shown if the user has set a specific name (see 2f), do not show the UUID again.
+
+The message could be a snackbar, but preferably something that flashes for a second or two in the middle of the screen. More like the old "Toast" standard.
 
 
 ### ~~kg/lbs unit toggle on the dock~~ — confirmed impossible

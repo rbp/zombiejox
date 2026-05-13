@@ -1,3 +1,4 @@
+import 'dart:convert' show jsonDecode, jsonEncode;
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
@@ -22,6 +23,7 @@ class Preferences {
   static const _keyUnit = 'units';
   static const _keyUnitExplicit = 'unit_explicitly_chosen';
   static const _keyRememberedDeviceIds = 'remembered_device_ids';
+  static const _keyCustomDeviceNames = 'custom_device_names';
 
   static Future<Preferences> load() async {
     final p = await SharedPreferences.getInstance();
@@ -88,6 +90,47 @@ class Preferences {
 
   Future<void> setRememberedDeviceIds(List<String> ids) async {
     await _prefs.setStringList(_keyRememberedDeviceIds, ids);
+  }
+
+  /// User-chosen display names per device id (§2e). A device id absent
+  /// from this map means the user hasn't renamed it; UI falls back to
+  /// the advertised name or the raw id (via [DeviceRef.displayName]).
+  ///
+  /// Persisted as a JSON-encoded string rather than a separate prefs key
+  /// per device — one read, one write, no key-namespace pollution. The
+  /// dataset is tiny (a user has 2-4 dumbbells in practice) so any size
+  /// concern would be hypothetical.
+  ///
+  /// A malformed payload (manual edit, schema change in a future version)
+  /// is treated as "no custom names" rather than throwing — the user's
+  /// fitness app shouldn't refuse to start because one preference is
+  /// junk. The bad payload stays on disk until the next [setCustomDeviceNames]
+  /// overwrites it.
+  Map<String, String> get customDeviceNames {
+    final raw = _prefs.getString(_keyCustomDeviceNames);
+    if (raw == null || raw.isEmpty) return const {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return const {};
+      return {
+        for (final entry in decoded.entries)
+          if (entry.key is String && entry.value is String)
+            entry.key as String: entry.value as String,
+      };
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// Replace the full custom-name map. Pass an empty map to clear.
+  /// Mirrors [setRememberedDeviceIds]'s replace-don't-merge semantics —
+  /// the caller knows the full desired state.
+  Future<void> setCustomDeviceNames(Map<String, String> names) async {
+    if (names.isEmpty) {
+      await _prefs.remove(_keyCustomDeviceNames);
+      return;
+    }
+    await _prefs.setString(_keyCustomDeviceNames, jsonEncode(names));
   }
 }
 

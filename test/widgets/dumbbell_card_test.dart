@@ -165,6 +165,180 @@ void main() {
         reason: 'must NOT claim Idle while no state frame has arrived');
   });
 
+  testWidgets(
+      'displayName override (§2e) — when provided, replaces the name '
+      'shown on the card', (tester) async {
+    final fake = _FakeDumbbell(_device('AA:01', name: 'DB200-01'));
+    addTearDown(fake.dispose);
+
+    await _pump(
+      tester,
+      DumbbellCard(
+        dumbbell: fake,
+        unit: WeightUnit.lbs,
+        onRemove: () {},
+        displayName: 'My Left',
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('My Left'), findsOneWidget);
+    expect(find.text('DB200-01'), findsNothing,
+        reason: 'displayName override hides the advertised name');
+  });
+
+  testWidgets(
+      'rename flow (§2e): tap the name → dialog opens → OK fires '
+      'onRename with the entered string', (tester) async {
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+    final renames = <String>[];
+
+    await _pump(
+      tester,
+      DumbbellCard(
+        dumbbell: fake,
+        unit: WeightUnit.lbs,
+        onRemove: () {},
+        displayName: 'AA:01',
+        onRename: renames.add,
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('AA:01'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rename dumbbell'), findsOneWidget,
+        reason: 'name tap opens the rename dialog');
+    // Replace the field contents.
+    await tester.enterText(find.byType(TextField), 'Left');
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    expect(renames, ['Left'],
+        reason: 'OK propagates the entered string to onRename');
+  });
+
+  testWidgets('rename Cancel — dialog dismisses without firing onRename',
+      (tester) async {
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+    final renames = <String>[];
+
+    await _pump(
+      tester,
+      DumbbellCard(
+        dumbbell: fake,
+        unit: WeightUnit.lbs,
+        onRemove: () {},
+        displayName: 'AA:01',
+        onRename: renames.add,
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('AA:01'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rename dumbbell'), findsNothing);
+    expect(renames, isEmpty,
+        reason: 'Cancel is a no-op for the parent callback');
+  });
+
+  testWidgets(
+      'rename dialog: maxLength caps the input and newlines are rejected '
+      '(§2e defensive guards from PR #26 Copilot review)', (tester) async {
+    // Paste-with-newline + over-long input should be silently truncated
+    // and stripped — junk inputs can't bloat the prefs blob or render
+    // multi-line text on a single-line card row.
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+    final renames = <String>[];
+
+    await _pump(
+      tester,
+      DumbbellCard(
+        dumbbell: fake,
+        unit: WeightUnit.lbs,
+        onRemove: () {},
+        displayName: 'AA:01',
+        onRename: renames.add,
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('AA:01'));
+    await tester.pumpAndSettle();
+
+    // 40 chars, with embedded newlines. After formatters: newlines
+    // stripped, then truncated to 32 chars.
+    await tester
+        .enterText(find.byType(TextField), 'one\ntwo\nthree-four-five-six-seven-eight-nine');
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    expect(renames, hasLength(1));
+    final committed = renames.single;
+    expect(committed.contains('\n'), isFalse,
+        reason: 'newlines must be stripped at the input layer');
+    expect(committed.length, lessThanOrEqualTo(32),
+        reason: 'maxLength must cap the persisted string');
+  });
+
+  testWidgets(
+      'rename dialog: existing name is pre-selected so the user can '
+      'replace it in one keystroke (§2e PR #26 Copilot review)',
+      (tester) async {
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+    final renames = <String>[];
+
+    await _pump(
+      tester,
+      DumbbellCard(
+        dumbbell: fake,
+        unit: WeightUnit.lbs,
+        onRemove: () {},
+        displayName: 'Old',
+        onRename: renames.add,
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Old'));
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    final selection = field.controller!.selection;
+    expect(selection.start, 0);
+    expect(selection.end, 'Old'.length,
+        reason: 'whole-text pre-selection — type-to-replace UX');
+  });
+
+  testWidgets('no onRename → tapping the name is a dead tap (no dialog)',
+      (tester) async {
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+
+    await _pump(
+      tester,
+      DumbbellCard(
+        dumbbell: fake,
+        unit: WeightUnit.lbs,
+        onRemove: () {},
+        displayName: 'AA:01',
+        // onRename omitted intentionally.
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('AA:01'));
+    await tester.pumpAndSettle();
+    expect(find.text('Rename dumbbell'), findsNothing,
+        reason: 'no rename callback ⇒ tap is inert');
+  });
+
   testWidgets('falls back to remoteId when advName is empty', (tester) async {
     // DeviceRef with empty name falls back to the id.
     final fake = _FakeDumbbell(_device('AA:BB:CC'));

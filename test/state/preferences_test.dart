@@ -103,6 +103,70 @@ void main() {
     });
   });
 
+  group('customDeviceNames', () {
+    test('defaults to empty before any set', () async {
+      final prefs = await Preferences.load();
+      expect(prefs.customDeviceNames, isEmpty);
+    });
+
+    test('setCustomDeviceNames persists across loads', () async {
+      {
+        final prefs = await Preferences.load();
+        await prefs.setCustomDeviceNames({
+          'AA:01': 'Left',
+          'AA:02': 'Right',
+        });
+        expect(prefs.customDeviceNames, {
+          'AA:01': 'Left',
+          'AA:02': 'Right',
+        });
+      }
+      {
+        final prefs = await Preferences.load();
+        expect(prefs.customDeviceNames, {
+          'AA:01': 'Left',
+          'AA:02': 'Right',
+        });
+      }
+    });
+
+    test('setCustomDeviceNames replaces, does not merge', () async {
+      final prefs = await Preferences.load();
+      await prefs.setCustomDeviceNames({'AA:01': 'Left'});
+      await prefs.setCustomDeviceNames({'AA:02': 'Right'});
+      expect(prefs.customDeviceNames, {'AA:02': 'Right'});
+    });
+
+    test('setCustomDeviceNames({}) clears the stored value', () async {
+      final prefs = await Preferences.load();
+      await prefs.setCustomDeviceNames({'AA:01': 'Left'});
+      await prefs.setCustomDeviceNames(const {});
+      expect(prefs.customDeviceNames, isEmpty);
+    });
+
+    test('malformed payload on disk is treated as empty (no crash on launch)',
+        () async {
+      // Simulate a corrupted preference value — manual edit, schema
+      // shift, etc. The user's fitness app shouldn't refuse to start
+      // because of one bad pref.
+      SharedPreferences.setMockInitialValues({
+        'custom_device_names': '{not valid json',
+      });
+      final prefs = await Preferences.load();
+      expect(prefs.customDeviceNames, isEmpty);
+    });
+
+    test(
+        'payload with non-string values is treated as empty (defensive '
+        'against a future schema change)', () async {
+      SharedPreferences.setMockInitialValues({
+        'custom_device_names': '{"AA:01": 42}',
+      });
+      final prefs = await Preferences.load();
+      expect(prefs.customDeviceNames, isEmpty);
+    });
+  });
+
   group('unitExplicitlyChosen', () {
     test('defaults to false on a fresh install', () async {
       final prefs = await Preferences.load();
