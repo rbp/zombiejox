@@ -304,6 +304,10 @@ Currently, the name displayed is the device's uid, and is what shows up across t
 ### 2f. Per-device weight override
 i.e., asymmetric setting, gated behind a Settings toggle
 
+### 2g. Pull-down to refresh
+
+Pulling down from the main screen refreshes: re-fetches the weights of connected dumbbells, and refreshes the list of availabe dumbbells.
+
 
 ### ~~kg/lbs unit toggle on the dock~~ — confirmed impossible
 - No app-to-dock unit-write opcode exists (see §1i → *Confirmed impossible*). The user changes the dock's display unit via its own hidden physical gesture; the app reads the result via `0xD1` byte 8 and auto-matches its own display unit (already done in PR #10).
