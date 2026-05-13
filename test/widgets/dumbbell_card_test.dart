@@ -120,8 +120,13 @@ void main() {
     expect(find.text('Idle'), findsNothing);
   });
 
-  testWidgets('em-dash placeholder when no state yet but connected',
-      (tester) async {
+  testWidgets(
+      'BLE-connected but no state frame yet → activity glyph (not the '
+      'old "—" weight placeholder)', (tester) async {
+    // §2b: the right-hand cluster shows a static
+    // `Icons.bluetooth_searching` glyph during Connecting /
+    // Reconnecting instead of the bare em-dash — communicates "BLE
+    // activity here" through context.
     final fake = _FakeDumbbell(_device('AA:01'));
     addTearDown(fake.dispose);
 
@@ -130,7 +135,10 @@ void main() {
     fake.emitConnected();
     await tester.pump();
 
-    expect(find.text('—'), findsOneWidget);
+    expect(find.byIcon(Icons.bluetooth_searching), findsOneWidget,
+        reason: 'connecting + no state ⇒ activity glyph slot');
+    expect(find.text('—'), findsNothing,
+        reason: 'em-dash replaced by the activity glyph');
   });
 
   testWidgets(
@@ -240,6 +248,37 @@ void main() {
     expect(find.text('Reconnecting'), findsOneWidget);
     expect(find.text('Disconnected'), findsNothing,
         reason: 'retryState preempts the bare "Disconnected" fallback');
+  });
+
+  testWidgets(
+      'defensive "Disconnected" fallback keeps the last known weight '
+      'visible — does NOT swap it for the activity glyph (Copilot '
+      'review on PR #25)', (tester) async {
+    // When connState=disconnected AND state != null (a drop after the
+    // device was once ready, with no retryState because the supervisor
+    // didn't run for this case), the right-hand cluster should keep
+    // showing the known weight, not the bluetooth_searching glyph.
+    // Activity glyph only when we don't know the weight (state==null).
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+
+    await _pump(tester,
+        DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs, onRemove: () {}));
+    fake.emitConnected();
+    fake.emitState(
+      const DumbbellState(weightIndex: 2, motorActive: false, batteryPct: 88),
+    );
+    await tester.pump();
+    expect(find.text('20 lbs'), findsOneWidget);
+
+    // Drop without retry supervisor — the defensive fallback path.
+    fake.emitDisconnected();
+    await tester.pumpAndSettle();
+
+    expect(find.text('20 lbs'), findsOneWidget,
+        reason: 'known weight must still show in disconnected fallback');
+    expect(find.byIcon(Icons.bluetooth_searching), findsNothing,
+        reason: 'activity glyph only when state==null');
   });
 
   testWidgets(

@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show PlatformException;
+import 'package:flutter/services.dart' show HapticFeedback, PlatformException;
 import 'package:permission_handler/permission_handler.dart';
 
 import '../ble/ble_scanner.dart';
@@ -208,11 +208,52 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return scan.isGranted && connect.isGranted;
   }
 
+  /// Devices for which a reconnect-failure SnackBar has already been
+  /// shown for the current drop. Cleared per-device once the device
+  /// disappears from `snapshot.retryStates` (i.e. it reconnected, or
+  /// the user removed it) — a future drop is treated as a fresh
+  /// incident worth surfacing again.
+  final Set<DeviceRef> _reconnectFailureShown = {};
+
   void _onSnapshot(GroupSnapshot snapshot) {
     if (!mounted) return;
     setState(() => _snapshot = snapshot);
     _maybeFireOnAnyConnected();
+    _maybeShowReconnectFailureSnackBar(snapshot);
     _tickAutoMatcher();
+  }
+
+  /// Surface a single SnackBar the *first* time a member's reconnect
+  /// attempt fails for a given drop — so the user knows the supervisor
+  /// is actually working in the background, rather than the
+  /// "Reconnecting…" chip silently sitting on the card forever. Reset
+  /// per-device once the entry leaves `retryStates`.
+  void _maybeShowReconnectFailureSnackBar(GroupSnapshot next) {
+    // Clear shown markers for devices that are no longer in retry —
+    // either they reconnected or were removed. Next time they drop,
+    // we'll surface the SnackBar again.
+    _reconnectFailureShown.removeWhere(
+      (ref) => !next.retryStates.containsKey(ref),
+    );
+    for (final entry in next.retryStates.entries) {
+      final ref = entry.key;
+      // attempt >= 1 means the immediate first attempt failed and the
+      // supervisor is now in backoff. attempt == 0 is the initial
+      // post-drop scheduling — too noisy to surface every time.
+      if (entry.value.attempt < 1) continue;
+      if (_reconnectFailureShown.contains(ref)) continue;
+      _reconnectFailureShown.add(ref);
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${ref.displayName}: lost connection — retrying in the '
+            'background.',
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   /// Fires the first time any member is ready and persists the current
@@ -329,6 +370,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _onSelectIndex(int idx) async {
+    // §2b: haptic confirms the tap registered before the BLE write
+    // round-trips. The grid's `canPress` already gates on `anyReady`,
+    // so by the time this runs at least one member is ready to receive
+    // the write. If the write later throws, the SnackBar still
+    // surfaces — the haptic conveys "tap received," not "write
+    // succeeded." `selectionClick` is the lightest of the four
+    // canonical haptics and the semantically-correct one for a
+    // user-driven setting change.
+    unawaited(HapticFeedback.selectionClick());
     try {
       await _group.setWeightIndex(idx);
     } catch (e) {

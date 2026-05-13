@@ -156,7 +156,7 @@ android/app/src/main/AndroidManifest.xml   ✅
 ios/Runner/Info.plist                       ✅
 ```
 
-Total test count: **174 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
+Total test count: **178 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
 
 ### 1e. Platform setup — ✅ done
 
@@ -221,7 +221,7 @@ Edge-case states (§1h):
 
 Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case hardening, and visual polish. Not a separate implementation pass — incremental work on top of Phase 1.
 
-Shipped so far: §2a (state-stream robustness — auto-reconnect on drop + resume kick), §2c (About screen restructure), §2d (Design v1). Outstanding: §2b (UX polish — animations, refined empty/error states), §2e (rename dumbbells), §2f (per-device weight override), §2g (pull-down to refresh).
+Shipped so far: §2a (state-stream robustness — auto-reconnect on drop + resume kick), §2b (UX polish — animations + haptic + reconnect-failure SnackBar + activity glyph), §2c (About screen restructure), §2d (Design v1). Outstanding: §2e (rename dumbbells), §2f (per-device weight override), §2g (pull-down to refresh).
 
 ### ADR-001 — four sources of truth in the running app
 
@@ -254,9 +254,16 @@ Shipped as one PR alongside this plan refresh.
 
 **Pre-existing soundness gap that §2a also closes:** before this PR, `Dumbbell.isReady` stayed `true` after a mid-session drop (nothing in `Dumbbell` reacted to its own `connectionState` going `disconnected`). The weight grid stayed enabled and writes silent-failed. `Dumbbell.handleTransportDrop()` clears `_last` synchronously so `isReady` returns false and `WeightGroup._computeSnapshot` immediately stops counting the dropped dumbbell.
 
-### 2b. UX polish
-- Smooth motion-state animations on weight buttons
-- Better empty / loading / error states
+### 2b. UX polish — ✅ done
+
+Shipped in one PR. Six visible changes, none of them invasive:
+
+- **`WeightButton` selected/disabled tween.** `AnimatedContainer` + `AnimatedDefaultTextStyle` (150 ms, `fastOutSlowIn`) so the tile's fill and text colour cross-fade across selection / disable changes instead of flipping instantly. Visual contract from §2d unchanged — same rounded tile, same scheme, just smoother transitions.
+- **`DumbbellCard` status chip cross-fade.** The pill's fill + border colour tween via `AnimatedContainer` (200 ms), the label cross-fades via `AnimatedSwitcher` keyed on the label string, and the text style tweens via `AnimatedDefaultTextStyle`. Net effect: Connecting → Connected → Moving → Reconnecting feels continuous rather than three discrete flips.
+- **`DumbbellCard` body line cross-fade.** Same `AnimatedSwitcher` + `AnimatedDefaultTextStyle` pattern applied to the body text (`Connecting…` / `Idle` / `Moving…` / `Reconnecting…`).
+- **Activity glyph during Connecting / Reconnecting.** The right-hand cluster swaps the bare `"—"` weight placeholder for a static `Icons.bluetooth_searching` glyph (status-colour tinted) while `state == null`. Deliberately static rather than `CircularProgressIndicator` because the latter ticks forever and deadlocks `pumpAndSettle()` in widget tests — the animation cue lives in the chip + body cross-fades, and this glyph just signals "BLE activity here." When state arrives, the glyph cross-fades into the weight text.
+- **Haptic feedback on weight tap.** `HapticFeedback.selectionClick()` fires at the top of `_onSelectIndex` (before the BLE write round-trips) — gym UX is "tap registered" feedback, not "write succeeded." `selectionClick` is the canonical haptic for a user-driven setting change. No new dependency (stdlib `flutter/services`).
+- **Reconnect-failure SnackBar.** First time a member's reconnect attempt fails for a given drop (attempt counter ≥ 1), `HomeScreen` surfaces a one-shot SnackBar (`"<device>: lost connection — retrying in the background."`). Subsequent failures within the same drop stay silent — the card's "Reconnecting…" chip carries the ongoing state. Tracking is per-`DeviceRef`; the marker clears when the retry entry leaves `snapshot.retryStates` (so a future drop re-shows).
 
 ### 2c. About screen improvements — ✅ done
 
@@ -379,7 +386,7 @@ The bluetooth status pill may be truncated (e.g., "Conne..."). If the user taps 
 
 1. ✅ Phase 0 reverse-engineering (0a–0e done; 0f closed via static analysis — no HCI snoop needed)
 2. ✅ Phase 1 — Flutter MVP — PRs merged: #1, #2, #3, #7, #8, #10, #14–#20, plus the edge-case PR closing §1h.
-3. 🟡 Phase 2 — UX and UI improvements. §2a (state-stream robustness — auto-reconnect on drop + resume kick) + §2c (About screen) + §2d (Design v1) shipped. Still pending: §2b (UX polish), §2e (rename dumbbells), §2f (per-device weight override), §2g (pull-down to refresh).
+3. 🟡 Phase 2 — UX and UI improvements. §2a (state-stream robustness — auto-reconnect on drop + resume kick) + §2b (UX polish — animations + haptic + reconnect SnackBar) + §2c (About screen) + §2d (Design v1) shipped. Still pending: §2e (rename dumbbells), §2f (per-device weight override), §2g (pull-down to refresh).
 4. ⏳ Phase 3 — Testing & distribution
 
 ---
@@ -390,7 +397,7 @@ The bluetooth status pill may be truncated (e.g., "Conne..."). If the user taps 
 
 - ✅ **Protocol correctness** — `0xD6 <idx>` sent from nRF Connect physically moves the dumbbell across all 8 indices on `DB200-0161997`.
 - ✅ **Protocol unit tests** — `test/protocol/checksum_test.dart` and `test/protocol/frame_test.dart` exercise the checksum algorithm and the frame builder/parser round-trip.
-- ✅ **State + group + widget + screen unit tests** — 174 tests total covering `state/{weights,preferences,unit_auto_matcher,permission_request_flow}`, `devices/{dumbbell,weight_group}` (incl. `GroupSnapshot` derivations + `remove()` race guard + §2a reconnect supervisor: trigger conditions, backoff schedule via `fake_async`, `remove()`-mid-`waiting`, `remove()`-mid-`attempting`, `disconnectAll()` cancel, `kickReconnectsForResume`, in-flight protection, `setWeightIndex` skips reconnecting members), `widgets/{weight_button,dumbbell_card,failed_device_card}` (incl. `TextScaler` 1.6× large-font safety + the optional `onRemove` affordance + the mid-session-drop "Disconnected" state + the §2a "Reconnecting…" state via `retryState` prop), `screens/{home,permission,settings,about}_screen` (warm-start seeding, promote-on-tap, retry, ×-remove, auto-match-from-dock, unit-toggle live re-label, consensus / motor-active, persisted-set, BT-adapter-off banner, permission-revoked-on-resume re-route, scan-empty hint + Scan again, §2a mid-session drop renders "Reconnecting…" + resume kick fires reconnect + revoked-permissions resume blocks reconnect). Includes the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
+- ✅ **State + group + widget + screen unit tests** — 178 tests total covering `state/{weights,preferences,unit_auto_matcher,permission_request_flow}`, `devices/{dumbbell,weight_group}` (incl. `GroupSnapshot` derivations + `remove()` race guard + §2a reconnect supervisor: trigger conditions, backoff schedule via `fake_async`, `remove()`-mid-`waiting`, `remove()`-mid-`attempting`, `disconnectAll()` cancel, `kickReconnectsForResume`, in-flight protection, `setWeightIndex` skips reconnecting members), `widgets/{weight_button,dumbbell_card,failed_device_card}` (incl. `TextScaler` 1.6× large-font safety + the optional `onRemove` affordance + the mid-session-drop "Disconnected" state + the §2a "Reconnecting…" state via `retryState` prop), `screens/{home,permission,settings,about}_screen` (warm-start seeding, promote-on-tap, retry, ×-remove, auto-match-from-dock, unit-toggle live re-label, consensus / motor-active, persisted-set, BT-adapter-off banner, permission-revoked-on-resume re-route, scan-empty hint + Scan again, §2a mid-session drop renders "Reconnecting…" + resume kick fires reconnect + revoked-permissions resume blocks reconnect). Includes the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
 - ✅ **Multi-device fan-out (architectural)** — `WeightGroup.setWeightIndex` fan-out covered by unit tests against a fake-Dumbbell.
 
 ### Pending — needs on-device verification (Android + iOS)
