@@ -88,7 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
   /// briefly leaves [GroupSnapshot.failed] before reappearing in
   /// [GroupSnapshot.connected] doesn't shuffle past its neighbours.
   /// Seeded from [Preferences.rememberedDeviceIds] on warm start, then
-  /// grown by promote-on-tap and shrunk by per-card × / Disconnect-all.
+  /// grown by promote-on-tap and shrunk by per-card ×.
   final List<DeviceRef> _selectedDevices = [];
 
   bool _checkingPermissions = true;
@@ -168,8 +168,8 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Persist `_selectedDevices` to remembered-storage, but only after at
   /// least one member has ever reached `isReady`. Called on first verified
   /// connect, then on every subsequent change to the selected set
-  /// (promote-on-tap, ×-remove, Disconnect-all) — so the saved set always
-  /// reflects what the user actually has.
+  /// (promote-on-tap, ×-remove) — so the saved set always reflects what
+  /// the user actually has.
   void _persistRememberedIfVerified() {
     if (!_onAnyConnectedFired) return;
     unawaited(
