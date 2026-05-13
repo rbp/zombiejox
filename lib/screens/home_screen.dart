@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:permission_handler/permission_handler.dart';
 
 import '../ble/ble_scanner.dart';
@@ -147,16 +148,17 @@ class _HomeScreenState extends State<HomeScreen>
     try {
       granted = await (widget.checkPermissionsGranted ??
           _defaultCheckPermissionsGranted)();
-    } catch (e, st) {
-      // A platform-channel hiccup on resume shouldn't tear the screen
-      // down. Log and assume granted — the user can always re-revoke
-      // via Settings and the next resume will catch it.
+    } on PlatformException catch (e, st) {
+      // Narrow catch: a flaky platform channel on resume shouldn't
+      // tear the screen down, but a Dart-side bug (e.g. a test
+      // injecting a synchronous throw) should still surface. The
+      // next resume will retry the check; if BT permission really
+      // has been revoked, we'll catch it then.
       debugPrint('permission recheck failed: $e\n$st');
       return;
     }
     if (!mounted) return;
     if (granted) return;
-    // ignore: use_build_context_synchronously
     final navigator = Navigator.of(context);
     // `pushAndRemoveUntil` (not `pushReplacement`): the user may have a
     // Settings or About route pushed on top of Home when permissions
@@ -271,10 +273,13 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// User tapped × on a top card. Drop from `_selectedDevices` and
-  /// disconnect / clear the failure entry on the group.
+  /// disconnect / clear the failure entry on the group. Symmetric with
+  /// [_onPromote]: short-circuit when the device isn't in the list so
+  /// a no-op tap doesn't rebuild the (immutable) list for nothing.
   Future<void> _onRemove(DeviceRef device) async {
-    setState(() =>
-        _selectedDevices = [for (final d in _selectedDevices) if (d != device) d]);
+    if (!_selectedDevices.contains(device)) return;
+    setState(() => _selectedDevices =
+        [for (final d in _selectedDevices) if (d != device) d]);
     _persistRememberedIfVerified();
     await _group.remove(device);
   }

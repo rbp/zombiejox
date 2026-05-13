@@ -217,9 +217,24 @@ Edge-case states (§1h):
 
 ---
 
-## Phase 2: Polish & hardening — ⏳ pending
+## Phase 2: Polish & hardening — 🟡 partially shipped
 
 Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case hardening, and visual polish. Not a separate implementation pass — incremental work on top of Phase 1.
+
+### ADR-001 — four sources of truth in the running app
+
+Recorded post-Phase-1 multi-agent code review (Round 2). The app keeps four state spaces; **each is owned by exactly one module** and consumers read it from there:
+
+1. **Transport state** — per-device BLE connection liveness, owned by `BleTransport` (production: `BleConnection`) inside `Dumbbell`. Surfaced to callers via `Dumbbell.connectionState` (`Stream<BleConnectionState>`).
+2. **Protocol state** — the last parsed `DumbbellState` per device (weight index, motor active, battery, unit byte), owned by `Dumbbell.lastState` and emitted via `Dumbbell.states`.
+3. **Group snapshot** — the projected `GroupSnapshot` (membership, failed map, consensus, motor, units), owned by `WeightGroup` and emitted on `WeightGroup.snapshots`. Computed inside `_computeSnapshot`; consumers don't recompute.
+4. **User intent** — the user's *selected* device list (today: `HomeScreen._selectedDevices`; planned: extracted into a `SelectionModel` under `lib/state/` when §2e rename + §2f per-device override land, because they're per-`DeviceRef` user-owned metadata in the same lifecycle).
+
+**Consequences:**
+
+- The `BleTransport` port is bound by `Dumbbell`'s default constructor (`Dumbbell(this.device) : _ble = BleConnection(device)`). Closing that seam end-to-end (an optional `BleTransport` parameter for tests) is **deferred until a second concrete transport is required** — neither §2a nor wear-OS support actually needs it; reconnect-on-resume runs through the same `BleTransport` instance.
+- `DumbbellCard` currently subscribes to (1) and (2) separately and re-derives connection / motor labels. This is the one remaining place where a screen-side widget computes derived state that could live on (3). The intended fix is to extend `GroupSnapshot` with a per-`DeviceRef` view-model so the card becomes a pure `Stateless` projection over a single value object. Tracked as Phase 2 cleanup.
+- Adding "rename" or "per-device weight override" without first extracting (4) into `lib/state/` will push `HomeScreen` past the junction-box threshold. Don't.
 
 ### 2a. State-stream robustness
 - Reconnect-on-resume after app backgrounded
