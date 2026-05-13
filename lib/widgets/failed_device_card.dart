@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 import '../ble/device_ref.dart';
 
 /// Card shown for a [DeviceRef] whose `connect()` threw. Visually matches
-/// `DumbbellCard` but with an error-coloured "Failed" status chip and a
-/// refresh icon for retrying.
+/// `DumbbellCard` but with an error-coloured "Failed" status chip, a
+/// refresh icon for retrying, and a "×" icon for dismissing the slot.
 ///
 /// Pure UI: takes the device, the error (rendered as a tooltip on the
-/// icon), and a retry callback. Owning state lives on `HomeScreen`.
+/// refresh icon), an [onRetry] callback for the refresh tap, and an
+/// [onRemove] callback for the "×" tap. Owning state lives on
+/// `HomeScreen`.
 class FailedDeviceCard extends StatelessWidget {
   final DeviceRef device;
   final Object error;
