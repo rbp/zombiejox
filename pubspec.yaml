@@ -21,6 +21,10 @@ dev_dependencies:
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.14.1
   flutter_native_splash: ^2.4.3
+  # Direct dependency for `WeightGroup`'s backoff-schedule tests. Already
+  # in the resolved set transitively via flutter_test, but `analyzer`
+  # requires a direct entry to silence depend_on_referenced_packages.
+  fake_async: ^1.3.0
 
 flutter:
   uses-material-design: true

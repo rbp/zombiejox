@@ -1,9 +1,48 @@
 import 'dart:async';
 
+import '../ble/ble_connection_state.dart';
 import '../ble/device_ref.dart';
 import '../protocol/dumbbell_state.dart';
 import '../state/weights.dart';
 import 'dumbbell.dart';
+
+/// Phase of a per-device reconnect attempt managed by [WeightGroup].
+///
+/// Each member that has ever reached [Dumbbell.isReady] is tracked here
+/// once its transport drops. The phase flows
+/// `waiting` ↔ `attempting`; on success the entry is removed from
+/// [GroupSnapshot.retryStates] entirely (returning to "idle" implicitly).
+enum RetryPhase {
+  /// Backoff timer is scheduled; no `Dumbbell.reconnect()` call is in
+  /// flight yet. Cancellable via [WeightGroup.remove] or
+  /// [WeightGroup.disconnectAll], or fast-forwarded by
+  /// [WeightGroup.kickReconnectsForResume].
+  waiting,
+
+  /// `Dumbbell.reconnect()` is awaiting `_ble.connect()` completion.
+  /// Not cancellable mid-flight (the `BleConnection` carries no abort
+  /// primitive); the racing connect will either succeed and the next
+  /// state frame clears the retry entry, or it will throw and the
+  /// supervisor reschedules.
+  attempting,
+}
+
+/// Immutable description of a member's current reconnect attempt.
+/// Surfaced via [GroupSnapshot.retryStates] so consumers (today:
+/// `DumbbellCard` via `HomeScreen`) render a "Reconnecting…" affordance
+/// off the snapshot rather than re-deriving from streams.
+class RetryState {
+  /// Where we are in the retry loop.
+  final RetryPhase phase;
+
+  /// Zero-indexed count of reconnect attempts that have already
+  /// completed (failed) for this drop. Drives the backoff schedule
+  /// lookup. Reset to zero each time the dumbbell reaches `isReady`
+  /// again.
+  final int attempt;
+
+  const RetryState({required this.phase, required this.attempt});
+}
 
 /// Immutable view of a [WeightGroup]'s full state at one instant.
 ///
@@ -28,6 +67,16 @@ class GroupSnapshot {
   /// retry's dumbbell landing in [connected]. If the retry also throws,
   /// the entry is replaced with the new error.
   final Map<DeviceRef, Object> failed;
+
+  /// Per-device reconnect state for members whose transport has
+  /// dropped after they were once ready and whose retry timer / connect
+  /// is in flight. Entries appear when [Dumbbell.connectionState]
+  /// emits `disconnected` against an ever-ready member, and disappear
+  /// when the reconnect succeeds (next state arrival) or the member is
+  /// removed. A device is in [connected] AND in [retryStates] for the
+  /// duration of its retry; consumers read this map to render
+  /// "Reconnecting…" instead of the initial-connecting affordance.
+  final Map<DeviceRef, RetryState> retryStates;
 
   /// The weight index every state-bearing member agrees on, or null if
   /// no member has reported state yet or if reporters disagree (e.g.
@@ -58,6 +107,7 @@ class GroupSnapshot {
   const GroupSnapshot({
     required this.connected,
     required this.failed,
+    required this.retryStates,
     required this.consensusIndex,
     required this.anyMoving,
     required this.anyReady,
@@ -68,6 +118,7 @@ class GroupSnapshot {
   static const empty = GroupSnapshot(
     connected: [],
     failed: {},
+    retryStates: {},
     consensusIndex: null,
     anyMoving: false,
     anyReady: false,
@@ -75,6 +126,22 @@ class GroupSnapshot {
     knownUnitCount: 0,
   );
 }
+
+/// Backoff schedule for reconnect attempts: index N is the wait BEFORE
+/// the (N+1)-th attempt. The first retry is immediate so a transient
+/// blip (the dumbbell briefly out of range) resolves without the user
+/// staring at a "Reconnecting…" chip for two seconds. After the schedule
+/// is exhausted, the last entry repeats indefinitely — the cancel UI is
+/// the × button on the card, not a give-up timeout (see §2a in
+/// IMPLEMENTATION_PLAN.md).
+const List<Duration> _kBackoffSchedule = [
+  Duration.zero,
+  Duration(seconds: 2),
+  Duration(seconds: 5),
+  Duration(seconds: 15),
+  Duration(seconds: 30),
+  Duration(seconds: 60),
+];
 
 /// A set of [Dumbbell]s driven as a unit. The default user model: one
 /// weight selection applies to every connected dumbbell in parallel.
@@ -87,14 +154,32 @@ class GroupSnapshot {
 /// don't manage their own state subscriptions, don't track failures
 /// separately, and don't recompute consensus / motor / unit derivations
 /// per build.
+///
+/// **Reconnect supervision (§2a):** when a member's transport drops
+/// after the member has been ready, the group calls
+/// [Dumbbell.handleTransportDrop] to clear stale per-connect state and
+/// schedules a backoff retry via [Dumbbell.reconnect]. Retry continues
+/// indefinitely while the slot is occupied; cancellation lives on the
+/// × button ([remove]) and on [disconnectAll].
 class WeightGroup {
   final List<Dumbbell> _dumbbells = [];
   final Map<DeviceRef, Object> _failed = {};
   final Map<Dumbbell, StreamSubscription<DumbbellState>> _stateSubs = {};
+  final Map<Dumbbell, StreamSubscription<BleConnectionState>> _connSubs = {};
   // Per-dumbbell memo of the last state we *processed*. Without this, real
   // dumbbells' ~1 Hz `0xD2` broadcasts (same weightIndex, same motor state)
   // would churn the snapshot stream once per second per member forever.
   final Map<Dumbbell, DumbbellState?> _lastSeen = {};
+  // Members that have ever reached `isReady` (i.e. a state frame arrived).
+  // Gates the drop reaction: a slot that drops before ever becoming ready
+  // is an initial-connect failure, handled by the existing _failed path.
+  final Set<Dumbbell> _everReady = {};
+  // Per-member retry bookkeeping. Entries are keyed by Dumbbell (not
+  // DeviceRef) so the snapshot's _computeSnapshot can look them up
+  // cheaply during the membership iteration. Surfaced as a DeviceRef
+  // map on the snapshot for consumers.
+  final Map<Dumbbell, Timer> _retryTimers = {};
+  final Map<Dumbbell, RetryState> _retryStates = {};
   final StreamController<GroupSnapshot> _controller =
       StreamController.broadcast();
   GroupSnapshot _last = GroupSnapshot.empty;
@@ -167,6 +252,12 @@ class WeightGroup {
     // we don't miss a state that arrives between the success of connect()
     // and our resume point.
     _stateSubs[db] = db.states.listen(_onStateUpdate(db));
+    // §2a: also subscribe to the connection-state stream so we can
+    // react to mid-session transport drops. The listener is a no-op
+    // until the member first reaches `isReady` (tracked via
+    // [_everReady]) — drops before initial-connect succeed go through
+    // [_recordFailure] via the catch block below, not this path.
+    _connSubs[db] = db.connectionState.listen(_onConnStateUpdate(db));
     _emit();
     try {
       await db.connect();
@@ -217,8 +308,12 @@ class WeightGroup {
     _dumbbells.remove(db);
     _failed[device] = error;
     _lastSeen.remove(db);
+    _everReady.remove(db);
+    _retryStates.remove(db);
+    _retryTimers.remove(db)?.cancel();
     _emit();
     unawaited(_stateSubs.remove(db)?.cancel() ?? Future.value());
+    unawaited(_connSubs.remove(db)?.cancel() ?? Future.value());
     try {
       await db.disconnect();
     } catch (_) {/* best-effort */}
@@ -238,6 +333,11 @@ class WeightGroup {
   /// `_stateSubs.containsKey` as a "consumer still cares" probe and
   /// will skip the failure-snapshot population.
   ///
+  /// Also cancels any pending or in-flight reconnect retry for the
+  /// device: the retry timer is cancelled synchronously, and an
+  /// in-flight `Dumbbell.reconnect()` is short-circuited via the same
+  /// `_consumerStillCares` probe — its eventual resolution is a no-op.
+  ///
   /// No-op if the group is already disposed.
   Future<void> remove(DeviceRef device) async {
     if (_disposed) return;
@@ -252,10 +352,16 @@ class WeightGroup {
     if (matched != null) {
       _dumbbells.remove(matched);
       _lastSeen.remove(matched);
-      // Cancel the state sub synchronously before emitting so the next
-      // snapshot really is the post-remove state. The cancel future
-      // itself is best-effort.
+      _everReady.remove(matched);
+      // Cancel the retry timer synchronously so a fire scheduled for
+      // the next tick doesn't slip past the membership check.
+      _retryTimers.remove(matched)?.cancel();
+      _retryStates.remove(matched);
+      // Cancel the state + conn subs synchronously before emitting so
+      // the next snapshot really is the post-remove state. The cancel
+      // futures themselves are best-effort.
       unawaited(_stateSubs.remove(matched)?.cancel() ?? Future.value());
+      unawaited(_connSubs.remove(matched)?.cancel() ?? Future.value());
     }
     if (matched == null && !hadFailed) return;
     _emit();
@@ -273,7 +379,9 @@ class WeightGroup {
   /// underlying TX characteristic. The UI is the primary guard (it
   /// disables weight buttons while no member is ready); this filter is
   /// a defence-in-depth layer so a stray fast tap during the connect
-  /// window doesn't crash.
+  /// window doesn't crash. Members mid-reconnect are filtered out the
+  /// same way — [Dumbbell.handleTransportDrop] clears `lastState` so
+  /// `isReady` returns false.
   ///
   /// Errors are not swallowed: the returned future waits for every ready
   /// member's write to complete (success or failure) and then surfaces
@@ -288,6 +396,29 @@ class WeightGroup {
     return Future.wait([for (final d in ready) d.setWeightIndex(index)]);
   }
 
+  /// Fast-forward any pending reconnect timers so they fire immediately.
+  /// Called from `HomeScreen.didChangeAppLifecycleState` on resume so
+  /// the user doesn't sit through a 60s wait after un-backgrounding the
+  /// app. Members currently in [RetryPhase.attempting] are left alone:
+  /// re-issuing a second `Dumbbell.reconnect()` while the first is
+  /// awaiting `_ble.connect()` would race against itself.
+  void kickReconnectsForResume() {
+    if (_disposed) return;
+    final waiting = [
+      for (final entry in _retryStates.entries)
+        if (entry.value.phase == RetryPhase.waiting) entry.key
+    ];
+    for (final db in waiting) {
+      _retryTimers.remove(db)?.cancel();
+      // Preserve the attempt count — the user resuming doesn't reset
+      // the supervisor's view of how many attempts have failed. The
+      // *next* schedule on failure will use the same attempt index.
+      // Fire-and-forget: _attemptReconnect updates _retryStates and
+      // emits as it progresses; the kicker doesn't need its result.
+      unawaited(_attemptReconnect(db));
+    }
+  }
+
   /// Disconnect every member, clear all bookkeeping, and close the
   /// snapshot stream. Best-effort: if one member's `disconnect()`
   /// throws, the rest are still awaited (`eagerError: false`) — teardown
@@ -298,19 +429,35 @@ class WeightGroup {
     final all = List<Dumbbell>.from(_dumbbells);
     _dumbbells.clear();
     _failed.clear();
+    // Cancel every pending retry timer synchronously so a fire
+    // scheduled for the next tick can't slip past the teardown.
+    for (final t in _retryTimers.values) {
+      t.cancel();
+    }
+    _retryTimers.clear();
+    _retryStates.clear();
+    _everReady.clear();
     // Clear _lastSeen first so any racing state notification arriving
     // mid-cancel bails on `_onStateUpdate`'s containsKey guard — the
     // `cancel()` calls below are awaited best-effort, and we don't want
     // a late event to slip through during that window and emit a
     // post-teardown snapshot.
-    final subs =
+    final stateSubs =
         List<StreamSubscription<DumbbellState>>.from(_stateSubs.values);
+    final connSubs =
+        List<StreamSubscription<BleConnectionState>>.from(_connSubs.values);
     _stateSubs.clear();
+    _connSubs.clear();
     _lastSeen.clear();
-    for (final s in subs) {
+    for (final s in stateSubs) {
       // Best-effort: a stuck `cancel()` would otherwise stall the entire
       // dispose chain. Each subscription is a local broadcast listener;
       // it can't meaningfully fail.
+      try {
+        await s.cancel();
+      } catch (_) {/* best-effort */}
+    }
+    for (final s in connSubs) {
       try {
         await s.cancel();
       } catch (_) {/* best-effort */}
@@ -328,10 +475,113 @@ class WeightGroup {
       // disconnectAll / catch-block teardown has already removed this
       // dumbbell's bookkeeping. Drop the late state push.
       if (!_lastSeen.containsKey(db)) return;
-      if (_lastSeen[db] == state) return;
+      _everReady.add(db);
+      // A state arriving on a member that's currently in a retry
+      // (post-handleTransportDrop) means the reconnect succeeded — clear
+      // the retry entry so consumers see "Connected" again, not
+      // "Reconnecting…". Done before the dedupe check so a same-as-pre-
+      // drop state still produces the retry-state-clearing snapshot.
+      final clearedRetry = _retryStates.remove(db) != null;
+      _retryTimers.remove(db)?.cancel();
+      if (_lastSeen[db] == state) {
+        if (clearedRetry) _emit();
+        return;
+      }
       _lastSeen[db] = state;
       _emit();
     };
+  }
+
+  void Function(BleConnectionState) _onConnStateUpdate(Dumbbell db) {
+    return (s) {
+      if (s != BleConnectionState.disconnected) return;
+      if (_disposed) return;
+      if (!_consumerStillCares(db)) return;
+      // Only react to drops on members that have been ready at least
+      // once: an initial-connect drop is handled by the catch block in
+      // [add], which moves the device to [_failed]. Reacting here would
+      // double-emit and confuse the failure-vs-retry distinction.
+      if (!_everReady.contains(db)) return;
+      // An `attempting` retry's own teardown of the prior BleConnection
+      // emits a `disconnected` event before the new transport connects.
+      // Suppress that noise — the in-flight `Dumbbell.reconnect()`
+      // future is the source of truth for the next phase transition.
+      if (_retryStates[db]?.phase == RetryPhase.attempting) return;
+      _kickReconnect(db);
+    };
+  }
+
+  /// First-cut reaction to a verified drop. Clears the per-connect
+  /// state on the [Dumbbell] (so `isReady` flips false synchronously)
+  /// and schedules the first reconnect attempt at backoff[0]
+  /// (immediate). Emits the resulting snapshot so the UI sees
+  /// "Reconnecting…" before the timer fires.
+  void _kickReconnect(Dumbbell db) {
+    db.handleTransportDrop();
+    // Reset the dedupe memo: without this, a post-reconnect state that
+    // happens to equal the pre-drop state would be filtered out and the
+    // snapshot's retry-state-clearing emission would be skipped. (The
+    // retry-clearing path in _onStateUpdate now emits regardless, but
+    // resetting _lastSeen keeps the dedupe semantics honest.)
+    if (_lastSeen.containsKey(db)) {
+      _lastSeen[db] = null;
+    }
+    _retryStates[db] = const RetryState(
+      phase: RetryPhase.waiting,
+      attempt: 0,
+    );
+    _emit();
+    _scheduleNextAttempt(db);
+  }
+
+  /// Set a [Timer] for the current attempt's backoff. The actual
+  /// `Dumbbell.reconnect()` call happens inside [_attemptReconnect].
+  void _scheduleNextAttempt(Dumbbell db) {
+    final entry = _retryStates[db];
+    if (entry == null) return;
+    final i = entry.attempt < _kBackoffSchedule.length
+        ? entry.attempt
+        : _kBackoffSchedule.length - 1;
+    final delay = _kBackoffSchedule[i];
+    _retryTimers[db]?.cancel();
+    _retryTimers[db] = Timer(delay, () => _attemptReconnect(db));
+  }
+
+  /// Run one reconnect attempt against the dumbbell's transport. The
+  /// retry counter is *not* bumped on success; on failure, it's bumped
+  /// and the next attempt is scheduled at the next backoff entry.
+  Future<void> _attemptReconnect(Dumbbell db) async {
+    if (_disposed || !_consumerStillCares(db)) return;
+    final existing = _retryStates[db];
+    if (existing == null) return;
+    _retryTimers.remove(db);
+    _retryStates[db] = RetryState(
+      phase: RetryPhase.attempting,
+      attempt: existing.attempt,
+    );
+    _emit();
+    try {
+      await db.reconnect();
+    } catch (e) {
+      if (_disposed || !_consumerStillCares(db)) return;
+      final attempts = existing.attempt + 1;
+      _retryStates[db] = RetryState(
+        phase: RetryPhase.waiting,
+        attempt: attempts,
+      );
+      _emit();
+      _scheduleNextAttempt(db);
+      return;
+    }
+    if (_disposed || !_consumerStillCares(db)) return;
+    // Success: reconnect's connect() returned. The state subscription
+    // is already wired through the constructor-bound _states controller
+    // — the next `0xD1` arrival will land in [_onStateUpdate], which
+    // clears the retry entry and emits a fresh snapshot. We leave the
+    // entry in `attempting` until then so the card keeps showing
+    // "Reconnecting…" rather than flashing through a transient
+    // "Connected/Idle/—" state for the gap between connect resolving
+    // and the first state frame.
   }
 
   void _emit() {
@@ -347,6 +597,7 @@ class WeightGroup {
     var anyReady = false;
     final knownUnits = <WeightUnit>{};
     var knownUnitCount = 0;
+    final retryStates = <DeviceRef, RetryState>{};
     // Every derived field gates on `Dumbbell.isReady` rather than just
     // `lastState != null`. `Dumbbell.disconnect()` does not clear
     // `lastState`, so a hypothetical disconnected-but-still-in-
@@ -364,6 +615,8 @@ class WeightGroup {
     // state arrives) and a null-deref here would be a needlessly
     // brittle coupling to the contract.
     for (final d in _dumbbells) {
+      final retry = _retryStates[d];
+      if (retry != null) retryStates[d.device] = retry;
       if (!d.isReady) continue;
       final s = d.lastState;
       if (s == null) continue;
@@ -386,6 +639,7 @@ class WeightGroup {
     return GroupSnapshot(
       connected: List.unmodifiable(_dumbbells),
       failed: Map.unmodifiable(_failed),
+      retryStates: Map.unmodifiable(retryStates),
       consensusIndex: consensus,
       anyMoving: anyMoving,
       anyReady: anyReady,

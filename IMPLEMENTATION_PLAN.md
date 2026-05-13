@@ -74,7 +74,7 @@ PRs merged against `main`:
 
 The app's current user flow: rationale on first launch → grant → home screen. Home shows the selected devices at the top (seeded from warm-start memory on cold launch), the always-visible 8-tile weight grid in the middle, and live scan results in the bottom region. Tapping a scan card promotes it to the top + connects; tapping × on a top card disconnects and drops the slot. Settings/About via the AppBar gear. Toggling kg/lbs in Settings re-labels every weight tile live; on first connect, if the user hasn't picked a unit yet, the app silently matches whatever the docks are set to (SnackBar) or surfaces a "set one in Settings" hint if the docks disagree.
 
-All edge-case states the user can land in — Bluetooth off, permission revoked mid-session, all dumbbells out of range, a connected dumbbell drops mid-session — have explicit UI now (§1h). Remaining gates to ship are on-device verification (Phase 2 / 3); no implementation work outstanding for Phase 1.
+All edge-case states the user can land in — Bluetooth off, permission revoked mid-session, all dumbbells out of range, a connected dumbbell drops mid-session — have explicit UI now (§1h). Mid-session drops then auto-reconnect via §2a's supervisor without user intervention. Remaining gates to ship are on-device verification (Phase 2 / 3); no implementation work outstanding for Phase 1.
 
 ### 1a. Create the Flutter project at the repo root — ✅ done
 
@@ -127,8 +127,8 @@ lib/
     ble_scanner.dart                ✅   scan interface + ScanHit value type + FlutterBluePlusScanner adapter
     ble_service.dart                ✅   BleConnection — production BleTransport adapter backed by flutter_blue_plus
   devices/
-    dumbbell.dart                   ✅
-    weight_group.dart               ✅   N-device fan-out
+    dumbbell.dart                   ✅   PR §2a: + handleTransportDrop / reconnect (WG-internal API); _ble non-final; lazy connectionState forwarder
+    weight_group.dart               ✅   N-device fan-out. PR §2a: + reconnect supervisor (RetryState/RetryPhase, _retryTimers/_retryStates/_everReady/_connSubs, kickReconnectsForResume)
   state/
     preferences.dart                ✅   units (reactive); remembered device IDs; explicit-unit-choice flag + auto-match-safe setter
     permission_request_flow.dart    ✅   PR #16: state machine for rationale → requesting → granted / denied transitions
@@ -144,7 +144,7 @@ lib/
                                         scan_screen.dart and control_screen.dart deleted in PR #20.
   widgets/
     weight_button.dart              ✅   PR #19: rounded tile with FittedBox(scaleDown) for large-font safety
-    dumbbell_card.dart              ✅   PR #19: rounded surface + status chip. PR #20: optional onRemove
+    dumbbell_card.dart              ✅   PR #19: rounded surface + status chip. PR #20: optional onRemove. PR §2a: optional `retryState` prop → "Reconnecting…" chip
     failed_device_card.dart         ✅   shown when a device's connect throws; refresh + optional × icons
 test/
   protocol/                         ✅   checksum_test, frame_test (incl. 0xD1 unit-byte parse)
@@ -156,7 +156,7 @@ android/app/src/main/AndroidManifest.xml   ✅
 ios/Runner/Info.plist                       ✅
 ```
 
-Total test count: **154 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
+Total test count: **167 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
 
 ### 1e. Platform setup — ✅ done
 
@@ -221,6 +221,8 @@ Edge-case states (§1h):
 
 Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case hardening, and visual polish. Not a separate implementation pass — incremental work on top of Phase 1.
 
+Shipped so far: §2a (state-stream robustness — auto-reconnect on drop + resume kick), §2c (About screen restructure), §2d (Design v1). Outstanding: §2b (UX polish — animations, refined empty/error states), §2e (rename dumbbells), §2f (per-device weight override), §2g (pull-down to refresh).
+
 ### ADR-001 — four sources of truth in the running app
 
 Recorded post-Phase-1 multi-agent code review (Round 2). The app keeps four state spaces; **each is owned by exactly one module** and consumers read it from there:
@@ -232,14 +234,24 @@ Recorded post-Phase-1 multi-agent code review (Round 2). The app keeps four stat
 
 **Consequences:**
 
-- The `BleTransport` port is bound by `Dumbbell`'s default constructor (`Dumbbell(this.device) : _ble = BleConnection(device)`). Closing that seam end-to-end (an optional `BleTransport` parameter for tests) is **deferred until a second concrete transport is required** — neither §2a nor wear-OS support actually needs it; reconnect-on-resume runs through the same `BleTransport` instance.
-- `DumbbellCard` currently subscribes to (1) and (2) separately and re-derives connection / motor labels. This is the one remaining place where a screen-side widget computes derived state that could live on (3). The intended fix is to extend `GroupSnapshot` with a per-`DeviceRef` view-model so the card becomes a pure `Stateless` projection over a single value object. Tracked as Phase 2 cleanup.
+- The `BleTransport` port is still bound by `Dumbbell`'s default constructor (`Dumbbell(this.device) : _ble = BleConnection(device)`). §2a's reconnect path swaps `_ble` internally for a fresh `BleConnection(device)` after a drop — so `_ble` is now non-final, but the constructor seam (an optional `BleTransport` parameter for tests) is still deferred. Tests fake `Dumbbell` by subclassing it directly and overriding public methods; the constructor seam adds no value while that pattern works.
+- `DumbbellCard` currently subscribes to (1) and (2) separately and re-derives connection / motor labels. This is the one remaining place where a screen-side widget computes derived state that could live on (3). §2a added a `retryState: RetryState?` prop wired from `GroupSnapshot.retryStates[device]` — that's one more piece of derived state pushed onto the snapshot, but the card still owns the `connState`/`state` subscriptions. The intended fix is to extend `GroupSnapshot` with a per-`DeviceRef` view-model so the card becomes a pure `Stateless` projection over a single value object. Tracked as Phase 2 cleanup.
 - Adding "rename" or "per-device weight override" without first extracting (4) into `lib/state/` will push `HomeScreen` past the junction-box threshold. Don't.
 
-### 2a. State-stream robustness
-- Reconnect-on-resume after app backgrounded
-- Graceful handling when one of N connected devices drops mid-session
-- Confirmed: dumbbells **reject OS-level bonding** — never call `createBond()` (see `docs/ble_protocol.md` §1)
+### 2a. State-stream robustness — ✅ done
+
+Shipped as one PR alongside this plan refresh.
+
+**What works:**
+
+- **Auto-reconnect after a mid-session drop.** `WeightGroup` subscribes to each member's `Dumbbell.connectionState`. When a member that has ever reached `isReady` reports `disconnected` (and the consumer still cares — `_consumerStillCares` race guard), the supervisor calls `Dumbbell.handleTransportDrop()` (clears `_last` / `_pendingBatteryPct` / `_rxSub` so `isReady` flips false synchronously) and schedules a backoff retry. Backoff is `[0s, 2s, 5s, 15s, 30s, 60s]`, repeating at 60s indefinitely — cancel UI is the × button on the card, not a give-up timeout.
+- **Reconnect-on-resume.** `HomeScreen.didChangeAppLifecycleState(resumed)` re-checks permissions; on `granted`, calls `WeightGroup.kickReconnectsForResume()` which fast-forwards every `RetryPhase.waiting` timer to fire immediately. Members in `RetryPhase.attempting` (in-flight `Dumbbell.reconnect()`) are skipped — re-issuing would race the awaiting connect.
+- **`Dumbbell.reconnect()`.** Tears down the old `_ble`, constructs a fresh `BleConnection(device)`, re-wires the lazy `connectionState` forwarder if listeners are attached, then runs the normal `connect()` flow. `_ble` is no longer `final`; subscribers to `Dumbbell.connectionState` / `Dumbbell.states` stay attached across the swap via Dumbbell-owned broadcast controllers. `Dumbbell.handleTransportDrop()` and `Dumbbell.reconnect()` are public methods documented as WeightGroup-internal — only the supervisor should call them.
+- **Snapshot surface.** New `GroupSnapshot.retryStates: Map<DeviceRef, RetryState>` with a `RetryState { phase, attempt }` value type (phases: `waiting`, `attempting`; entries vanish on next state arrival or on `remove()` / `disconnectAll()`). `DumbbellCard` accepts an optional `retryState` prop wired by `HomeScreen` from the snapshot; the new "Reconnecting…" status chip preempts the bare "Disconnected" fallback that's now a defensive fallback only.
+- **Cancellation correctness.** `WeightGroup.remove()` cancels the per-device retry `Timer` synchronously, removes from `_retryStates`/`_everReady`/`_connSubs`/`_stateSubs`, and the `_consumerStillCares` probe in the retry callback short-circuits any racing reconnect. `disconnectAll()` cancels every timer synchronously before tearing down subs.
+- **Confirmed:** dumbbells **reject OS-level bonding** — never call `createBond()` (see `docs/ble_protocol.md` §1). Reconnect goes through the same `flutter_blue_plus` `BluetoothDevice.connect(autoConnect: false)` path as initial connect.
+
+**Pre-existing soundness gap that §2a also closes:** before this PR, `Dumbbell.isReady` stayed `true` after a mid-session drop (nothing in `Dumbbell` reacted to its own `connectionState` going `disconnected`). The weight grid stayed enabled and writes silent-failed. `Dumbbell.handleTransportDrop()` clears `_last` synchronously so `isReady` returns false and `WeightGroup._computeSnapshot` immediately stops counting the dropped dumbbell.
 
 ### 2b. UX polish
 - Smooth motion-state animations on weight buttons
@@ -356,11 +368,11 @@ Pulling down from the main screen refreshes: re-fetches the weights of connected
 
 ## Recommended Order of Work
 
-**Phase 0 + Phase 1 are complete; §2c About + §2d Design v1 have landed.** End-to-end: set + read weight on N dumbbells via a single Home screen with promote-on-tap and per-card × remove, warm-start seeding, Settings/About with reactive unit toggle, auto-match-from-dock, dark M3 theme, large-font + tablet portability, custom icon + splash. Edge-case states (BT off, all out of range, mid-session drops, permission revoked mid-session) all have explicit UI. Remaining work is on-device verification + further Phase 2 polish.
+**Phase 0 + Phase 1 are complete; §2a state-stream robustness + §2c About + §2d Design v1 have landed.** End-to-end: set + read weight on N dumbbells via a single Home screen with promote-on-tap and per-card × remove, warm-start seeding, Settings/About with reactive unit toggle, auto-match-from-dock, dark M3 theme, large-font + tablet portability, custom icon + splash. Edge-case states (BT off, all out of range, mid-session drops with auto-reconnect, permission revoked mid-session) all have explicit UI. Remaining work is on-device verification + further Phase 2 polish.
 
 1. ✅ Phase 0 reverse-engineering (0a–0e done; 0f closed via static analysis — no HCI snoop needed)
 2. ✅ Phase 1 — Flutter MVP — PRs merged: #1, #2, #3, #7, #8, #10, #14–#20, plus the edge-case PR closing §1h.
-3. 🟡 Phase 2 — UX and UI improvements. §2c About screen + §2d Design v1 shipped. Still pending: §2a (state-stream robustness — reconnect-on-resume + drop-then-reconnect), §2b (UX polish), §2e (rename dumbbells), §2f (per-device weight override).
+3. 🟡 Phase 2 — UX and UI improvements. §2a (state-stream robustness — auto-reconnect on drop + resume kick) + §2c (About screen) + §2d (Design v1) shipped. Still pending: §2b (UX polish), §2e (rename dumbbells), §2f (per-device weight override), §2g (pull-down to refresh).
 4. ⏳ Phase 3 — Testing & distribution
 
 ---
@@ -371,7 +383,7 @@ Pulling down from the main screen refreshes: re-fetches the weights of connected
 
 - ✅ **Protocol correctness** — `0xD6 <idx>` sent from nRF Connect physically moves the dumbbell across all 8 indices on `DB200-0161997`.
 - ✅ **Protocol unit tests** — `test/protocol/checksum_test.dart` and `test/protocol/frame_test.dart` exercise the checksum algorithm and the frame builder/parser round-trip.
-- ✅ **State + group + widget + screen unit tests** — 154 tests total covering `state/{weights,preferences,unit_auto_matcher,permission_request_flow}`, `devices/{dumbbell,weight_group}` (incl. `GroupSnapshot` derivations + `remove()` race guard), `widgets/{weight_button,dumbbell_card,failed_device_card}` (incl. `TextScaler` 1.6× large-font safety + the optional `onRemove` affordance + the mid-session-drop "Disconnected" state), `screens/{home,permission,settings,about}_screen` (warm-start seeding, promote-on-tap, retry, ×-remove, auto-match-from-dock, unit-toggle live re-label, consensus / motor-active, persisted-set, BT-adapter-off banner, permission-revoked-on-resume re-route, scan-empty hint + Scan again). Includes the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
+- ✅ **State + group + widget + screen unit tests** — 167 tests total covering `state/{weights,preferences,unit_auto_matcher,permission_request_flow}`, `devices/{dumbbell,weight_group}` (incl. `GroupSnapshot` derivations + `remove()` race guard + §2a reconnect supervisor: trigger conditions, backoff schedule via `fake_async`, `remove()`-mid-`waiting`, `remove()`-mid-`attempting`, `disconnectAll()` cancel, `kickReconnectsForResume`, in-flight protection, `setWeightIndex` skips reconnecting members), `widgets/{weight_button,dumbbell_card,failed_device_card}` (incl. `TextScaler` 1.6× large-font safety + the optional `onRemove` affordance + the mid-session-drop "Disconnected" state + the §2a "Reconnecting…" state via `retryState` prop), `screens/{home,permission,settings,about}_screen` (warm-start seeding, promote-on-tap, retry, ×-remove, auto-match-from-dock, unit-toggle live re-label, consensus / motor-active, persisted-set, BT-adapter-off banner, permission-revoked-on-resume re-route, scan-empty hint + Scan again, §2a mid-session drop renders "Reconnecting…" + resume kick fires reconnect + revoked-permissions resume blocks reconnect). Includes the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
 - ✅ **Multi-device fan-out (architectural)** — `WeightGroup.setWeightIndex` fan-out covered by unit tests against a fake-Dumbbell.
 
 ### Pending — needs on-device verification (Android + iOS)
@@ -399,12 +411,19 @@ The unit + widget test suites cover the pure-Dart and Flutter-widget layers, but
 - **Edge-case spot-checks** (§1h):
   - Bluetooth turned off mid-session: the error-coloured "Bluetooth is off" banner appears at the top of the Home body, the scan area copy switches to "Turn Bluetooth on to scan.", the Open Settings button takes you to the app's system settings page (where BT-related permissions live; from there or via the OS quick-settings panel you toggle Bluetooth back on). Toggle BT back on → banner + copy disappear, scan resumes.
   - All dumbbells out of range: after the 30 s scan timeout the bottom region shows "No JaxJox dumbbells found. Make sure they're powered on and in range." with a tonal Scan again button. Tap → scan restarts.
-  - Mid-session drop: power off a connected dumbbell — its card flips to an error-coloured "Disconnected" chip + body line (not "Connecting…"). Power it back on — it does not auto-reconnect yet (that's §2a); the user needs to ×-remove it and re-add it from the scan list.
+  - Mid-session drop: power off a connected dumbbell — its card flips to a "Reconnecting…" chip + body line (§2a; was "Disconnected" before §2a landed). Power it back on within a couple of minutes — the card returns to "Connected" without user intervention. Tap × on the card to give up reconnecting and drop the slot.
   - Permission revocation (Android): with HomeScreen visible, background the app, revoke "Nearby devices" in Settings.app, foreground it → HomeScreen pushes back to PermissionScreen automatically.
+- **§2a reconnect spot-checks:**
+  - Mid-session drop on one of N: with two dumbbells connected and ready, power one off. Its card flips to "Reconnecting…" within ~2 s. The weight grid stays enabled (the other member is still ready) and any tap on the grid is fanned out only to the still-ready peer. Power the dropped dumbbell back on — within seconds its card flips back through "Connecting…" to "Connected" / "Idle". The current weight may differ from the consensus until the post-reconnect state arrives.
+  - Drop on the *only* connected dumbbell: weight grid disables (no ready member). When it reconnects, grid re-enables.
+  - Long drop: power a connected dumbbell off and leave it off. Card stays on "Reconnecting…" indefinitely (retry repeats at the 60 s cap once the schedule is exhausted). Tap × on the card → slot disappears, no further retries fire, and the dumbbell is removed from `rememberedDeviceIds`.
+  - Resume kick: connect, power off, background the app for ≥ 60 s, power back on, foreground. The dumbbell reconnects within seconds of the resume — *not* after the next 60 s tick of the backoff. (Without the resume kick, the test would have to wait out a full retry cycle.)
+  - Resume with revoked permissions (Android): connect, power off so the card is "Reconnecting…", background, revoke "Nearby devices", foreground → HomeScreen routes to PermissionScreen and no reconnect attempt fires during the resume window (verifies the order in `_recheckPermissions`).
 
 #### iOS (verification platform)
 
 - The whole list above on a real iPhone — flutter_blue_plus and `permission_handler` behave subtly differently from Android, and BLE absolutely does not work in the iOS simulator.
 - **Specifically test the permission rationale's first-launch behaviour on iOS.** `permission_handler` reports `denied` for `Permission.bluetoothScan`/`bluetoothConnect` on iOS until the OS has prompted at least once, *but* the OS prompt itself is triggered by `flutter_blue_plus`'s first BLE op (controlled by `NSBluetoothAlwaysUsageDescription` in `ios/Runner/Info.plist`), not by our `permission_handler.request()` call. If the rationale screen doesn't show on first launch, or if Continue feels like a no-op (iOS already reported "granted" so we navigate to Home, then the OS prompt fires from `HomeScreen`'s first BLE call), we'll need to revisit the routing logic — possibly bring back a "rationale shown" flag specifically for iOS. The current implementation assumes iOS reports `denied` on first launch; this is the riskiest unverified assumption in the project right now.
 - The lbs/kg toggle in Settings actually re-labels the buttons live (verifies `ValueListenable` works through the iOS Flutter render path).
+- §2a reconnect on iOS: the drop event timing is plugin-specific. Verify the mid-session-drop spot-check on iOS — `flutter_blue_plus` may emit `disconnected` with different latency than Android, and CoreBluetooth's "system kills the connection when the peripheral goes out of range" semantics differ from Android's. The supervisor logic doesn't care about latency (it triggers on any `disconnected` for an ever-ready member), but the user-visible "card flips to Reconnecting…" delay is worth pinning down on real hardware.
 - TestFlight build is producible with the current scaffold.

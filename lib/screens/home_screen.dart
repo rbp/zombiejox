@@ -71,8 +71,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen>
-    with WidgetsBindingObserver {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   late final BleScanner _scanner =
       widget.scanner ?? const FlutterBluePlusScanner();
   late final WeightGroup _group =
@@ -158,7 +157,15 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
     if (!mounted) return;
-    if (granted) return;
+    if (granted) {
+      // §2a: a backgrounded app may have accumulated transport drops on
+      // its remembered dumbbells while suspended. Fast-forward any
+      // waiting retry timers so the user doesn't sit through the next
+      // 60s backoff window after un-backgrounding. In-flight attempts
+      // are left alone — re-issuing would race the awaiting connect.
+      _group.kickReconnectsForResume();
+      return;
+    }
     final navigator = Navigator.of(context);
     // `pushAndRemoveUntil` (not `pushReplacement`): the user may have a
     // Settings or About route pushed on top of Home when permissions
@@ -278,8 +285,10 @@ class _HomeScreenState extends State<HomeScreen>
   /// a no-op tap doesn't rebuild the (immutable) list for nothing.
   Future<void> _onRemove(DeviceRef device) async {
     if (!_selectedDevices.contains(device)) return;
-    setState(() => _selectedDevices =
-        [for (final d in _selectedDevices) if (d != device) d]);
+    setState(() => _selectedDevices = [
+          for (final d in _selectedDevices)
+            if (d != device) d
+        ]);
     _persistRememberedIfVerified();
     await _group.remove(device);
   }
@@ -315,7 +324,6 @@ class _HomeScreenState extends State<HomeScreen>
       );
     }
   }
-
 
   @override
   void dispose() {
@@ -434,6 +442,7 @@ class _Body extends StatelessWidget {
         dumbbell: dumbbell,
         unit: unit,
         onRemove: () => onRemove(device),
+        retryState: snapshot.retryStates[device],
       );
     }
     final error = snapshot.failed[device];
@@ -619,8 +628,7 @@ class _ScanHeader extends StatelessWidget {
         Text(
           'Available dumbbells',
           style: theme.textTheme.titleSmall?.copyWith(
-            color:
-                theme.textTheme.titleSmall?.color?.withValues(alpha: 0.7),
+            color: theme.textTheme.titleSmall?.color?.withValues(alpha: 0.7),
           ),
         ),
         const Spacer(),

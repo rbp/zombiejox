@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../ble/ble_connection_state.dart';
 import '../devices/dumbbell.dart';
+import '../devices/weight_group.dart' show RetryState;
 import '../protocol/dumbbell_state.dart';
 import '../state/weights.dart';
 
@@ -22,11 +23,19 @@ class DumbbellCard extends StatelessWidget {
   /// `WeightGroup` and from its own selected list.
   final VoidCallback onRemove;
 
+  /// Per-device reconnect state from the group snapshot, if the
+  /// transport has dropped and a retry is pending or in flight. Drives
+  /// the "Reconnecting…" status chip and body line; null means the
+  /// dumbbell is in its normal lifecycle (initial connect, connected,
+  /// motor active, or — fallback — a drop with no supervisor).
+  final RetryState? retryState;
+
   const DumbbellCard({
     super.key,
     required this.dumbbell,
     required this.unit,
     required this.onRemove,
+    this.retryState,
   });
 
   @override
@@ -45,6 +54,7 @@ class DumbbellCard extends StatelessWidget {
               state: state,
               unit: unit,
               onRemove: onRemove,
+              retryState: retryState,
             );
           },
         );
@@ -59,6 +69,7 @@ class _Card extends StatelessWidget {
   final DumbbellState? state;
   final WeightUnit unit;
   final VoidCallback onRemove;
+  final RetryState? retryState;
 
   const _Card({
     required this.name,
@@ -66,6 +77,7 @@ class _Card extends StatelessWidget {
     required this.state,
     required this.unit,
     required this.onRemove,
+    required this.retryState,
   });
 
   @override
@@ -82,18 +94,28 @@ class _Card extends StatelessWidget {
     // for one frame before settling into "Connecting…". `state != null`
     // is "the device has at some point reported a state frame", i.e.
     // "was once truly connected".
-    final disconnected = connState == BleConnectionState.disconnected &&
-        state != null;
+    final disconnected =
+        connState == BleConnectionState.disconnected && state != null;
+    final reconnecting = retryState != null;
     final weight = state == null ? '—' : formatWeight(state!.weightIndex, unit);
 
-    // Three-way status: a clean `disconnected` event after the device
-    // was once connected (drop mid-session) gets its own error-coloured
-    // label so the user doesn't misread it as "still connecting". The
-    // initial-connecting case (no state yet, no explicit `disconnected`)
-    // keeps the original tertiary-coloured "Connecting" treatment.
+    // Status priority:
+    //   1. `reconnecting`: supervisor is mid-backoff or mid-attempt for
+    //      this device. Same tertiary colour as initial Connecting —
+    //      visually it IS a connect attempt, just preceded by a drop.
+    //   2. `disconnected` (no retry state): drop without supervisor,
+    //      shouldn't normally happen but kept as a defensive fallback
+    //      so a future code path that bypasses [WeightGroup] doesn't
+    //      lie to the user with "Reconnecting…" when nothing is.
+    //   3. Initial connecting (no state, not yet connected).
+    //   4. Motor active.
+    //   5. Connected, idle.
     final String statusLabel;
     final Color statusColor;
-    if (disconnected) {
+    if (reconnecting) {
+      statusLabel = 'Reconnecting';
+      statusColor = scheme.tertiary;
+    } else if (disconnected) {
       statusLabel = 'Disconnected';
       statusColor = scheme.error;
     } else if (!connected) {
@@ -108,7 +130,9 @@ class _Card extends StatelessWidget {
     }
 
     final String bodyText;
-    if (disconnected) {
+    if (reconnecting) {
+      bodyText = 'Reconnecting…';
+    } else if (disconnected) {
       bodyText = 'Disconnected';
     } else if (!connected) {
       bodyText = 'Connecting…';
@@ -139,9 +163,9 @@ class _Card extends StatelessWidget {
                   Text(
                     bodyText,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: disconnected
+                      color: !reconnecting && disconnected
                           ? scheme.error
-                          : motorActive
+                          : !reconnecting && motorActive
                               ? scheme.secondary
                               : theme.textTheme.bodySmall?.color
                                   ?.withValues(alpha: 0.6),

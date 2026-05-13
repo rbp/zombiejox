@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zombiejox/ble/ble_connection_state.dart';
 import 'package:zombiejox/ble/device_ref.dart';
 import 'package:zombiejox/devices/dumbbell.dart';
+import 'package:zombiejox/devices/weight_group.dart'
+    show RetryPhase, RetryState;
 import 'package:zombiejox/protocol/dumbbell_state.dart';
 import 'package:zombiejox/state/weights.dart';
 import 'package:zombiejox/widgets/dumbbell_card.dart';
@@ -143,8 +145,7 @@ void main() {
     expect(find.text('AA:BB:CC'), findsOneWidget);
   });
 
-  testWidgets(
-      'onRemove → × icon renders and tap fires the callback',
+  testWidgets('onRemove → × icon renders and tap fires the callback',
       (tester) async {
     var removes = 0;
     final fake = _FakeDumbbell(_device('AA:01'));
@@ -183,6 +184,38 @@ void main() {
     expect(find.text('Disconnected'), findsNothing,
         reason: 'no state frame yet ⇒ still in initial-connecting phase');
     expect(find.text('Connecting…'), findsOneWidget);
+  });
+
+  testWidgets(
+      'retryState present → "Reconnecting…" chip + body (preempts the '
+      'plain "Disconnected" fallback)', (tester) async {
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+
+    await _pump(
+      tester,
+      DumbbellCard(
+        dumbbell: fake,
+        unit: WeightUnit.lbs,
+        onRemove: () {},
+        retryState: const RetryState(phase: RetryPhase.waiting, attempt: 1),
+      ),
+    );
+    fake.emitConnected();
+    fake.emitState(
+      const DumbbellState(weightIndex: 2, motorActive: false, batteryPct: 88),
+    );
+    await tester.pump();
+    // Now simulate a drop.
+    fake.emitDisconnected();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Reconnecting…'), findsOneWidget,
+        reason: 'retryState ⇒ Reconnecting body line');
+    // Status chip says "Reconnecting" (no ellipsis).
+    expect(find.text('Reconnecting'), findsOneWidget);
+    expect(find.text('Disconnected'), findsNothing,
+        reason: 'retryState preempts the bare "Disconnected" fallback');
   });
 
   testWidgets(
