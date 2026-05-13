@@ -1,7 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback, PlatformException;
 import 'package:permission_handler/permission_handler.dart';
@@ -74,10 +73,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  late final BleScanner _scanner =
-      widget.scanner ?? const FlutterBluePlusScanner();
-  late final WeightGroup _group =
-      widget.createWeightGroup?.call() ?? WeightGroup();
+  late final BleScanner _scanner = widget.scanner ?? const FlutterBluePlusScanner();
+  late final WeightGroup _group = widget.createWeightGroup?.call() ?? WeightGroup();
   late final UnitAutoMatcher _autoMatcher = UnitAutoMatcher(
     preferences: widget.preferences,
     onOutcome: _onAutoMatchOutcome,
@@ -159,8 +156,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _recheckPermissions() async {
     final bool granted;
     try {
-      granted = await (widget.checkPermissionsGranted ??
-          _defaultCheckPermissionsGranted)();
+      granted = await (widget.checkPermissionsGranted ?? _defaultCheckPermissionsGranted)();
     } on PlatformException catch (e, st) {
       // Narrow catch: a flaky platform channel on resume shouldn't
       // tear the screen down, but a Dart-side bug (e.g. a test
@@ -300,14 +296,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case AutoMatchOutcome.matched:
         final label = result.unit == WeightUnit.lbs ? 'lbs' : 'kg';
         messenger.showSnackBar(
-          SnackBar(
-              content: Text('Unit set to $label to match your dumbbells.')),
+          SnackBar(content: Text('Unit set to $label to match your dumbbells.')),
         );
       case AutoMatchOutcome.disagreement:
         messenger.showSnackBar(
           const SnackBar(
-            content: Text(
-                'Dumbbells are set to different units — pick one in Settings'),
+            content: Text('Dumbbells are set to different units — pick one in Settings'),
           ),
         );
     }
@@ -430,8 +424,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             onPressed: () => unawaited(
               Navigator.of(context).push<void>(
                 MaterialPageRoute<void>(
-                  builder: (_) =>
-                      SettingsScreen(preferences: widget.preferences),
+                  builder: (_) => SettingsScreen(preferences: widget.preferences),
                 ),
               ),
             ),
@@ -572,8 +565,7 @@ class _Body extends StatelessWidget {
         AnimatedSwitcher(
           key: ValueKey('slot-${device.id}'),
           duration: const Duration(milliseconds: 250),
-          transitionBuilder: (child, anim) =>
-              FadeTransition(opacity: anim, child: child),
+          transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
           child: _cardFor(device, dumbbellByDevice),
         ),
     ];
@@ -602,12 +594,17 @@ class _Body extends StatelessWidget {
           // on a small phone (~140 dp top region) only one card fits
           // without scrolling — the ListView absorbs the rest.
           //
-          // §2g: the region is wrapped in a RefreshIndicator so pulling
+          // The region is wrapped in a RefreshIndicator so pulling
           // down on the user's dumbbells fires `onRefresh` (re-query
           // connected weights + restart scan). The inner scrollable uses
           // `AlwaysScrollableScrollPhysics` so the gesture activates
           // even when the content is short — and the empty hint is
           // rendered through a `ListView` for the same reason.
+          // TODO:
+          // 1. Since only the top region is wrapped in the RefreshIndicator,
+          // pulling to refresh requires pulling from the very top of the screen.
+          // 2. The "refresh" icon feels too fast, even when pulling slowly. This might be
+          // a result of a small area being wrapped in RefreshIndicator.
           Expanded(
             flex: 2,
             child: RefreshIndicator(
@@ -679,9 +676,7 @@ class _Body extends StatelessWidget {
                   builder: (context, snap) {
                     final selectedSet = selectedDevices.toSet();
                     final results = (snap.data ?? const <ScanHit>[])
-                        .where((r) =>
-                            scanFilter(r.device.name) &&
-                            !selectedSet.contains(r.device))
+                        .where((r) => scanFilter(r.device.name) && !selectedSet.contains(r.device))
                         .toList();
                     return _ScanResults(
                       results: results,
@@ -795,14 +790,12 @@ class ScanResultCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(hit.device.displayName,
-                        style: theme.textTheme.titleMedium),
+                    Text(hit.device.displayName, style: theme.textTheme.titleMedium),
                     const SizedBox(height: 2),
                     Text(
                       'RSSI ${hit.rssi}',
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.textTheme.bodySmall?.color
-                            ?.withValues(alpha: 0.6),
+                        color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                       ),
                     ),
                   ],
