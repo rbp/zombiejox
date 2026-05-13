@@ -251,6 +251,37 @@ void main() {
   });
 
   testWidgets(
+      'defensive "Disconnected" fallback keeps the last known weight '
+      'visible — does NOT swap it for the activity glyph (Copilot '
+      'review on PR #25)', (tester) async {
+    // When connState=disconnected AND state != null (a drop after the
+    // device was once ready, with no retryState because the supervisor
+    // didn't run for this case), the right-hand cluster should keep
+    // showing the known weight, not the bluetooth_searching glyph.
+    // Activity glyph only when we don't know the weight (state==null).
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+
+    await _pump(tester,
+        DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs, onRemove: () {}));
+    fake.emitConnected();
+    fake.emitState(
+      const DumbbellState(weightIndex: 2, motorActive: false, batteryPct: 88),
+    );
+    await tester.pump();
+    expect(find.text('20 lbs'), findsOneWidget);
+
+    // Drop without retry supervisor — the defensive fallback path.
+    fake.emitDisconnected();
+    await tester.pumpAndSettle();
+
+    expect(find.text('20 lbs'), findsOneWidget,
+        reason: 'known weight must still show in disconnected fallback');
+    expect(find.byIcon(Icons.bluetooth_searching), findsNothing,
+        reason: 'activity glyph only when state==null');
+  });
+
+  testWidgets(
       'connection drop after a successful connect → "Disconnected" '
       'chip + body line (not the muted "Connecting…" fallback)',
       (tester) async {

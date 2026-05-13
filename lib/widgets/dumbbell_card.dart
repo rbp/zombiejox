@@ -153,12 +153,19 @@ class _Card extends StatelessWidget {
       bodyText = 'Idle';
     }
 
-    // Spinner is on whenever the protocol layer hasn't confirmed
-    // readiness — initial Connecting or supervisor-driven Reconnecting.
-    // It replaces the "—" weight placeholder so the right-hand cluster
-    // does double-duty: when we know the weight, show it; when we
-    // don't, show that we're working on it.
-    final showSpinner = connectingProto || reconnecting;
+    // Show the activity glyph (a static `Icons.bluetooth_searching`)
+    // whenever we don't have a known weight to display — i.e. no state
+    // frame has arrived yet (initial Connecting, or supervisor-driven
+    // Reconnecting which cleared `lastState` via
+    // `Dumbbell.handleTransportDrop`). The right-hand cluster
+    // alternates: glyph when we don't know the weight, weight value
+    // when we do.
+    //
+    // Specifically NOT `connectingProto || reconnecting` — that would
+    // include the defensive `disconnected` fallback (where `state !=
+    // null` and a known weight is available), drowning out the known
+    // value with a meaningless "we're working on it" glyph.
+    final showActivityGlyph = state == null;
 
     // Body text colour mirrors the chip colour for reconnecting +
     // disconnected + moving; everything else uses the muted body-text
@@ -234,7 +241,7 @@ class _Card extends StatelessWidget {
                     duration: const Duration(milliseconds: 200),
                     transitionBuilder: (child, anim) =>
                         FadeTransition(opacity: anim, child: child),
-                    child: showSpinner
+                    child: showActivityGlyph
                         ? Icon(
                             Icons.bluetooth_searching,
                             key: const ValueKey('connect-glyph'),
