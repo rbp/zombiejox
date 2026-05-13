@@ -174,50 +174,54 @@ class WeightGroup {
       // already wired; any state frame that arrives later will emit a
       // fresh snapshot via _onStateUpdate.
     } catch (e) {
-      // disconnectAll may have fired during the await; its cleanup
-      // already covered this dumbbell. Don't re-populate the failed
-      // map after the consumer has navigated away.
-      if (_disposed) {
-        try {
-          await db.disconnect();
-        } catch (_) {/* best-effort */}
+      // Two race-cleanup paths plus the ordinary failure path. Each is
+      // its own named method — the body of `add` should read top-to-
+      // bottom as "subscribe → connect → on failure: triage".
+      if (_disposed || !_consumerStillCares(db)) {
+        await _teardownAbandoned(db);
         return;
       }
-      // [remove] race: the user may have cancelled this particular
-      // device's slot while connect() was awaiting (tap × on the
-      // connecting card). [remove] cancelled the state subscription
-      // and dropped this dumbbell from `_dumbbells`. Re-populating
-      // `_failed` here would resurrect a slot the consumer has
-      // explicitly dismissed. Use `_stateSubs` as the "consumer still
-      // cares" probe — both `remove` and `disconnectAll` clear it.
-      if (!_stateSubs.containsKey(db)) {
-        try {
-          await db.disconnect();
-        } catch (_) {/* best-effort */}
-        return;
-      }
-      _dumbbells.remove(db);
-      _failed[device] = e;
-      _lastSeen.remove(db);
-      // Emit the failure snapshot synchronously (no `await` first). A
-      // racing late state notification on the about-to-be-cancelled
-      // subscription is dropped by `_onStateUpdate`'s containsKey
-      // guard, so we can let cancel() run in the background. Emitting
-      // first matters because consumers' `pumpAndSettle()` returns as
-      // soon as the framework is idle, which can happen between the
-      // `await db.connect()` rejection and a subsequent
-      // `await sub.cancel()` — i.e., the failure snapshot would
-      // otherwise land after the test's assertion point.
-      _emit();
-      unawaited(_stateSubs.remove(db)?.cancel() ?? Future.value());
-      // Release the streams + any partially-established BLE handle. The
-      // retry UX is built to be tapped repeatedly, so a forgotten
-      // disconnect() here would leak one StreamController + one rxSub
-      // per failed click.
-      try {
-        await db.disconnect();
-      } catch (_) {/* best-effort */}
+      await _recordFailure(db, device, e);
     }
+  }
+
+  /// True iff the consumer hasn't cancelled this slot mid-connect.
+  /// `_stateSubs` is the canonical probe — both [remove] and
+  /// [disconnectAll] clear it before the racing `await db.connect()`
+  /// resolves. Without this check, the [add] catch block could
+  /// re-populate `_failed` for a device the user already dismissed.
+  bool _consumerStillCares(Dumbbell db) => _stateSubs.containsKey(db);
+
+  /// The connect lost its consumer (group was disposed, or the slot
+  /// was removed via [remove]). Release the half-built BLE handle
+  /// best-effort. No snapshot emission — whoever cancelled us already
+  /// did that.
+  Future<void> _teardownAbandoned(Dumbbell db) async {
+    try {
+      await db.disconnect();
+    } catch (_) {/* best-effort */}
+  }
+
+  /// Connect failed and the consumer still wants to know — move the
+  /// device from `_dumbbells` to `_failed`, emit the failure snapshot,
+  /// then release the BLE handle. The snapshot has to land BEFORE
+  /// the disconnect's await: consumers' `pumpAndSettle()` returns as
+  /// soon as the framework is idle, which can happen between the
+  /// connect rejection and any subsequent await — the failure snapshot
+  /// would otherwise arrive after a test's assertion point.
+  Future<void> _recordFailure(
+    Dumbbell db,
+    DeviceRef device,
+    Object error,
+  ) async {
+    _dumbbells.remove(db);
+    _failed[device] = error;
+    _lastSeen.remove(db);
+    _emit();
+    unawaited(_stateSubs.remove(db)?.cancel() ?? Future.value());
+    try {
+      await db.disconnect();
+    } catch (_) {/* best-effort */}
   }
 
   /// Drop a single device from the group. If the device is in

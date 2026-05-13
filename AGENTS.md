@@ -47,11 +47,12 @@ NEVER use `git add -A` or `git commit -a`. Add the files you want to commit, ind
 ```
 lib/
   protocol/   ← pure Dart, NO Flutter imports. Frame, checksum, opcodes, DumbbellState. Unit-tested.
-  state/      ← pure Dart, NO Flutter imports (except `package:flutter/foundation.dart` for ValueNotifier). Preferences, weights, UnitAutoMatcher.
-  ble/        ← flutter_blue_plus wrapper, UUIDs, device-display helpers.
-  devices/    ← Dumbbell (one device) + WeightGroup (a connected set). The model layer.
+  state/      ← pure Dart, NO Flutter imports (except `package:flutter/foundation.dart` for ValueNotifier). Preferences, weights, UnitAutoMatcher, PermissionRequestFlow.
+  ble/        ← flutter_blue_plus wrapper. Plugin-agnostic port surface (BleTransport, BleScanner, DeviceRef, BleConnectionState, BleAdapterState) + the FlutterBluePlus adapter.
+  devices/    ← Dumbbell (one device) + WeightGroup (a connected set, owns GroupSnapshot). The model layer.
   widgets/    ← Reusable UI atoms (WeightButton, DumbbellCard, FailedDeviceCard).
-  screens/    ← Top-level screens (Permission, Scan, Control, Settings, About).
+  theme/      ← AppTheme (dark M3 scheme seeded from aubergine).
+  screens/    ← Top-level screens (HomeScreen, PermissionScreen, SettingsScreen, AboutScreen).
   main.dart   ← Entrypoint: load Preferences → check BT permissions → route.
 test/         ← Mirrors lib/. Pure-Dart layers get unit tests; widgets get widget tests.
 docs/ble_protocol.md  ← Canonical BLE spec. Dart transcribes from it, not the other way around.
@@ -59,9 +60,9 @@ docs/ble_protocol.md  ← Canonical BLE spec. Dart transcribes from it, not the 
 
 - **`protocol/` and `state/` are deliberately Flutter-free** so they can be unit-tested without a widget binding. Don't add `package:flutter/material.dart` imports there.
 - **`docs/ble_protocol.md` is the source of truth for the BLE protocol.** If you discover something new about the hardware, update the doc first, then transcribe to Dart.
-- **One `Dumbbell` per device, one `WeightGroup` per connected set.** Screens observe the model; they don't own BLE state.
+- **One `Dumbbell` per device, one `WeightGroup` per connected set.** Screens observe the model via `WeightGroup.snapshots` (Stream\<GroupSnapshot\>); they don't own BLE state, don't subscribe to individual dumbbells, and don't recompute consensus / motor / unit / failure-set derivations themselves.
 - **Preferences are reactive.** Expose preferences as `ValueListenable`s so widgets can rebuild without navigation round-trips.
-- **Scan filter** uses device-name prefixes (`DB200`, `KB200`, etc.) — see `docs/ble_protocol.md`.
+- **Scan filter** is deliberately narrow today: `kJaxJoxNamePrefixes = ['DB200']` in `lib/ble/uuids.dart`, plus a "skip names ending in `U`" DFU-mode rule. Other product prefixes (`KB200`, `PB220`, `FR100`, …) are catalogued in `docs/ble_protocol.md` §2 but intentionally not in the scan filter until a second product is wired up end-to-end.
 
 ## 5. Hardware safety (non-negotiable)
 
@@ -90,13 +91,13 @@ These are recurring traps that a recent thorough review surfaced. They are the d
 
 `Dumbbell.setWeightIndex` once had a debug-only `assert(index < 8)` standing between user input and a motor. **`assert` is stripped in `--release` builds.** An out-of-range index would have sent a malformed `0xD6 N` frame straight to the hardware. Rule of thumb: anything that crosses a trust boundary — user input → hardware, user input → network, untrusted data → parser — needs a check that survives `--release`. Throw `ArgumentError`/`RangeError`, or clamp explicitly with a comment.
 
-### 7.3 Derived state belongs on the model, not the view
+### 7.3 Derived state belongs on the model, not the view (shipped in PR #18)
 
-`_consensusIndex` / `_anyMoving` / `_anyReady` / `_failedDevices` are currently split between `WeightGroup` (live membership) and `ControlScreen` (failures + derivations). The view recomputes them on every rebuild, and the group doesn't know things about itself the screen knows. **The next refactor:** `WeightGroup` exposes a single `GroupSnapshot { connecting, ready, failed, consensusIndex, anyMoving }` as its public surface, and the screen becomes a projection of that snapshot. The screen can't drift from the model if it computes nothing.
+`_consensusIndex` / `_anyMoving` / `_anyReady` / `_failedDevices` were originally split between `WeightGroup` (live membership) and `ControlScreen` (failures + derivations). The screen recomputed them on every rebuild and could drift from the model. PR #18 moved them to `WeightGroup.snapshots` — a single `Stream<GroupSnapshot>` carrying `{ connected, failed, consensusIndex, anyMoving, anyReady, knownUnits, knownUnitCount }`. `HomeScreen` is now a pure projection of the snapshot. **Keep it that way.** Any new derived value belongs on `GroupSnapshot`, not as a per-build computation in a `_Body.build`.
 
 ### 7.4 Extract repeated lifecycle patterns
 
-The `_disposed` flag pattern is being hand-rolled in `Dumbbell`, `WeightGroup`, and `BleConnection` — three repetitions is enough to justify a named primitive (a `Disposable` mixin, or `package:async`'s `CancelableOperation`). Relatedly: `flutter_blue_plus`'s `connectionState` stream of `BluetoothConnectionState` currently leaks the plugin type into `DumbbellCard`. That coupling closes off cleanly once §7.3 lands and the screen consumes a `GroupSnapshot` instead of plugin types directly.
+The `_disposed` flag pattern is hand-rolled in `Dumbbell`, `WeightGroup`, and `BleConnection`. Three repetitions is enough to consider a named primitive (a `Disposable` mixin, or `package:async`'s `CancelableOperation`) — not yet justified, but flag it as a candidate when a fourth repetition lands. Relatedly: the plugin-port boundary in `lib/ble/` (`BleTransport`, `BleScanner`, `BleConnectionState`, `BleAdapterState`) keeps `flutter_blue_plus` types confined to `ble_service.dart` + `ble_scanner.dart`; consumers above the port see only the port types. Don't reintroduce direct `BluetoothDevice` / `BluetoothAdapterState` references in `devices/`, `state/`, `widgets/`, or `screens/`.
 
 ## 8. Working efficiently in this repo
 

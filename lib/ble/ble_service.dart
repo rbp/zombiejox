@@ -122,19 +122,13 @@ class BleConnection implements BleTransport {
   }
 
   static BleConnectionState _mapConnectionState(BluetoothConnectionState s) {
-    switch (s) {
-      case BluetoothConnectionState.connected:
-        return BleConnectionState.connected;
-      case BluetoothConnectionState.disconnected:
-        return BleConnectionState.disconnected;
-      // Forward-compat hedge: today `flutter_blue_plus` only emits the two
-      // states above, but older versions also surfaced transient
-      // `connecting` / `disconnecting`. If the plugin ever resurrects them,
-      // collapse both into `connecting` — the UI only cares about "not yet
-      // live" vs "live" vs "cleanly gone", and "in transition" rounds to
-      // "not yet live".
-      default:
-        return BleConnectionState.connecting;
-    }
+    // The plugin's deprecated `connecting` value never reaches this
+    // stream on Android/iOS (per the plugin's own docstring on
+    // `BluetoothConnectionState.connecting`). Map it to `disconnected`
+    // anyway — "not live" is the safe default for anything that isn't
+    // an explicit `connected`.
+    return s == BluetoothConnectionState.connected
+        ? BleConnectionState.connected
+        : BleConnectionState.disconnected;
   }
 }

@@ -13,19 +13,19 @@ class FailedDeviceCard extends StatelessWidget {
   final Object error;
   final VoidCallback onRetry;
 
-  /// Optional remove affordance. When non-null, the card renders a small
-  /// "×" close button alongside the refresh icon. HomeScreen passes a
-  /// callback that drops the device from the WeightGroup's `failed` map
-  /// and from its own selected list — useful when the user has no
-  /// intention of retrying a particular failed connect.
-  final VoidCallback? onRemove;
+  /// Remove affordance — renders a small "×" close button alongside the
+  /// refresh icon. HomeScreen passes a callback that drops the device
+  /// from the WeightGroup's `failed` map and from its own selected list
+  /// (useful when the user has no intention of retrying a particular
+  /// failed connect).
+  final VoidCallback onRemove;
 
   const FailedDeviceCard({
     super.key,
     required this.device,
     required this.error,
     required this.onRetry,
-    this.onRemove,
+    required this.onRemove,
   });
 
   @override
@@ -68,13 +68,12 @@ class FailedDeviceCard extends StatelessWidget {
               tooltip: 'Try again — $error',
               onPressed: onRetry,
             ),
-            if (onRemove != null)
-              IconButton(
-                icon: const Icon(Icons.close),
-                tooltip: 'Remove ${device.displayName}',
-                visualDensity: VisualDensity.compact,
-                onPressed: onRemove,
-              ),
+            IconButton(
+              icon: const Icon(Icons.close),
+              tooltip: 'Remove ${device.displayName}',
+              visualDensity: VisualDensity.compact,
+              onPressed: onRemove,
+            ),
           ],
         ),
       ),

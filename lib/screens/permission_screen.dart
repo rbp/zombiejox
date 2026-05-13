@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -55,9 +57,11 @@ class PermissionScreen extends StatefulWidget {
   }
 
   void _defaultOnGranted(BuildContext context) {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => HomeScreen(preferences: preferences),
+    unawaited(
+      Navigator.of(context).pushReplacement<void, void>(
+        MaterialPageRoute<void>(
+          builder: (_) => HomeScreen(preferences: preferences),
+        ),
       ),
     );
   }

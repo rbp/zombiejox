@@ -92,9 +92,8 @@ class _HomeScreenState extends State<HomeScreen>
   /// [GroupSnapshot.connected] doesn't shuffle past its neighbours.
   /// Seeded from [Preferences.rememberedDeviceIds] on warm start, then
   /// grown by promote-on-tap and shrunk by per-card ×.
-  final List<DeviceRef> _selectedDevices = [];
+  List<DeviceRef> _selectedDevices = const [];
 
-  bool _checkingPermissions = true;
   bool _onAnyConnectedFired = false;
 
   @override
@@ -107,7 +106,29 @@ class _HomeScreenState extends State<HomeScreen>
       if (!mounted) return;
       setState(() => _adapter = s);
     });
-    _ensurePermissionsAndBootstrap();
+    // No initial permission check here — `main.dart` (or the route
+    // pushing us) already verified that permissions are granted; the
+    // platform-channel call is therefore duplicated work and shows up
+    // as a one-frame spinner flash on every cold start. Revocation
+    // while we're alive is caught by `didChangeAppLifecycleState`
+    // below; the window between main's check and our mount is
+    // microseconds and not worth the duplicated work.
+    _bootstrap();
+  }
+
+  /// Warm-start seed + scan kick-off. Pulled out of [initState] so the
+  /// lifecycle is readable.
+  void _bootstrap() {
+    final remembered = widget.preferences.rememberedDeviceIds;
+    if (remembered.isNotEmpty) {
+      setState(() {
+        _selectedDevices = [for (final id in remembered) DeviceRef(id: id)];
+      });
+      for (final id in remembered) {
+        unawaited(_addOne(DeviceRef(id: id)));
+      }
+    }
+    unawaited(_startScan());
   }
 
   /// Re-check Bluetooth permissions whenever the app comes back to the
@@ -118,17 +139,25 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
-    // Don't re-check while the initial bootstrap check is still
-    // in-flight — it'll handle the same scenario and we'd double-push.
-    if (_checkingPermissions) return;
     unawaited(_recheckPermissions());
   }
 
   Future<void> _recheckPermissions() async {
-    final granted = await (widget.checkPermissionsGranted ??
-        _defaultCheckPermissionsGranted)();
+    final bool granted;
+    try {
+      granted = await (widget.checkPermissionsGranted ??
+          _defaultCheckPermissionsGranted)();
+    } catch (e, st) {
+      // A platform-channel hiccup on resume shouldn't tear the screen
+      // down. Log and assume granted — the user can always re-revoke
+      // via Settings and the next resume will catch it.
+      debugPrint('permission recheck failed: $e\n$st');
+      return;
+    }
     if (!mounted) return;
     if (granted) return;
+    // ignore: use_build_context_synchronously
+    final navigator = Navigator.of(context);
     // `pushAndRemoveUntil` (not `pushReplacement`): the user may have a
     // Settings or About route pushed on top of Home when permissions
     // get revoked. pushReplacement would replace whatever's on top —
@@ -136,57 +165,24 @@ class _HomeScreenState extends State<HomeScreen>
     // when PermissionScreen later re-pushes Home. Clear the stack
     // entirely so the rationale screen is the only route, mirroring
     // a fresh launch.
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
-        builder: (_) => PermissionScreen(preferences: widget.preferences),
+    unawaited(
+      navigator.pushAndRemoveUntil<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => PermissionScreen(preferences: widget.preferences),
+        ),
+        (route) => false,
       ),
-      (route) => false,
     );
   }
 
-  /// Permissions should already be granted by the time the user lands
-  /// here — `main.dart` routes a cold start through [PermissionScreen]
-  /// when they're not, and that screen's success path `pushReplacement`s
-  /// here. This is the defensive backstop for the OS-level-revocation
-  /// case (Settings.app toggled while the app is alive). On miss we
-  /// hand back to [PermissionScreen] rather than re-prompting inline —
-  /// iOS won't re-prompt once denied.
+  /// Default for the lifecycle re-check seam (see [_recheckPermissions]).
+  /// iOS won't re-prompt once denied, so we hand the user back to
+  /// [PermissionScreen] rather than re-prompting inline — the rationale
+  /// + denied + Open-Settings UI lives in one place.
   static Future<bool> _defaultCheckPermissionsGranted() async {
     final scan = await Permission.bluetoothScan.status;
     final connect = await Permission.bluetoothConnect.status;
     return scan.isGranted && connect.isGranted;
-  }
-
-  Future<void> _ensurePermissionsAndBootstrap() async {
-    final granted = await (widget.checkPermissionsGranted ??
-        _defaultCheckPermissionsGranted)();
-    if (!mounted) return;
-    if (!granted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => PermissionScreen(preferences: widget.preferences),
-        ),
-      );
-      return;
-    }
-    setState(() => _checkingPermissions = false);
-
-    // Warm-start seed: rehydrate previously-connected devices into the
-    // top region in `connecting` state, then fan out `_group.add` for
-    // each. We do this *before* starting the scan so the seed cards
-    // appear in the first frame after the permission check resolves.
-    final remembered = widget.preferences.rememberedDeviceIds;
-    if (remembered.isNotEmpty) {
-      setState(() {
-        for (final id in remembered) {
-          _selectedDevices.add(DeviceRef(id: id));
-        }
-      });
-      for (final id in remembered) {
-        unawaited(_addOne(DeviceRef(id: id)));
-      }
-    }
-    unawaited(_startScan());
   }
 
   void _onSnapshot(GroupSnapshot snapshot) {
@@ -269,7 +265,7 @@ class _HomeScreenState extends State<HomeScreen>
   /// off the connect.
   void _onPromote(DeviceRef device) {
     if (_selectedDevices.contains(device)) return;
-    setState(() => _selectedDevices.add(device));
+    setState(() => _selectedDevices = [..._selectedDevices, device]);
     _persistRememberedIfVerified();
     unawaited(_addOne(device));
   }
@@ -277,7 +273,8 @@ class _HomeScreenState extends State<HomeScreen>
   /// User tapped × on a top card. Drop from `_selectedDevices` and
   /// disconnect / clear the failure entry on the group.
   Future<void> _onRemove(DeviceRef device) async {
-    setState(() => _selectedDevices.remove(device));
+    setState(() =>
+        _selectedDevices = [for (final d in _selectedDevices) if (d != device) d]);
     _persistRememberedIfVerified();
     await _group.remove(device);
   }
@@ -291,8 +288,9 @@ class _HomeScreenState extends State<HomeScreen>
         await _scanner.stopScan();
       }
       // Native `withKeywords` is an efficiency hint that cuts BLE
-      // advertisement churn. Authoritative filtering is `_isJaxJox`
-      // applied to the stream results below.
+      // advertisement churn. Authoritative filtering is
+      // `isJaxJoxLiveDeviceName` (from `lib/ble/uuids.dart`) applied to
+      // the stream results below — that's what also rejects DFU names.
       await _scanner.startScan(
         withKeywords: kJaxJoxNamePrefixes,
         timeout: const Duration(seconds: 30),
@@ -313,11 +311,6 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  bool _isJaxJox(String name) {
-    if (name.isEmpty) return false;
-    if (name.endsWith('U')) return false; // DFU mode
-    return kJaxJoxNamePrefixes.any(name.startsWith);
-  }
 
   @override
   void dispose() {
@@ -338,12 +331,6 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
-    if (_checkingPermissions) {
-      // Brief frame or two while the permission check resolves. On miss
-      // we pushReplacement to PermissionScreen so this never becomes a
-      // stuck state.
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('ZombieJox'),
@@ -351,9 +338,12 @@ class _HomeScreenState extends State<HomeScreen>
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'Settings',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => SettingsScreen(preferences: widget.preferences),
+            onPressed: () => unawaited(
+              Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      SettingsScreen(preferences: widget.preferences),
+                ),
               ),
             ),
           ),
@@ -372,7 +362,7 @@ class _HomeScreenState extends State<HomeScreen>
               selectedDevices: _selectedDevices,
               scanner: _scanner,
               adapterState: _adapter,
-              scanFilter: _isJaxJox,
+              scanFilter: isJaxJoxLiveDeviceName,
               onSelectIndex: _onSelectIndex,
               onRetry: _addOne,
               onRemove: _onRemove,
@@ -469,9 +459,18 @@ class _Body extends StatelessWidget {
     final dumbbellByDevice = {
       for (final d in snapshot.connected) d.device: d,
     };
+    // Per-device slot key on the AnimatedSwitcher itself — not just its
+    // child. Without this, removing a card mid-list re-uses the
+    // AnimationController of slot N+1 for what was slot N, and the user
+    // sees the wrong cross-fade. The `ValueKey('slot-${device.id}')`
+    // makes each slot a stable identity across selection edits; the
+    // inner `_cardFor` keys (`connected-…`/`failed-…`/`pending-…`)
+    // continue to drive the switcher's connected ↔ failed cross-fade
+    // within a slot.
     final selectedCards = <Widget>[
       for (final device in selectedDevices)
         AnimatedSwitcher(
+          key: ValueKey('slot-${device.id}'),
           duration: const Duration(milliseconds: 250),
           transitionBuilder: (child, anim) =>
               FadeTransition(opacity: anim, child: child),
@@ -495,13 +494,12 @@ class _Body extends StatelessWidget {
             ),
             const SizedBox(height: 12),
           ],
-          // TOP — selected devices. Bounded share of the Column so 3+
-          // cards scroll within the region instead of pushing the grid
-          // / scan list off-screen. The flex share is the same as the
-          // bottom region so the layout reads symmetrically; on every
-          // phone we've measured the resulting height covers ≥ 2 cards,
-          // satisfying the "layout doesn't jump when the first card
-          // arrives" requirement.
+          // TOP — selected devices. Bounded share of the Column so
+          // overflow scrolls *within* the region instead of pushing the
+          // grid / scan list off-screen. flex matches the bottom for
+          // visual symmetry; on a tall phone two cards fit comfortably,
+          // on a small phone (~140 dp top region) only one card fits
+          // without scrolling — the ListView absorbs the rest.
           Expanded(
             flex: 2,
             child: selectedDevices.isEmpty
