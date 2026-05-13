@@ -92,6 +92,31 @@ void main() {
     expect(ink.onTap, isNull);
   });
 
+  testWidgets('fill colour tweens across selected ↔ unselected (§2b animation)',
+      (tester) async {
+    // The AnimatedContainer holds the fill — drives the smooth tween
+    // between scheme.surfaceContainerHighest and scheme.primary when
+    // `selected` flips. Verifying the widget is present is the
+    // cheapest reliable signal that the animation is wired; the
+    // pixel-level interpolation is Flutter framework territory.
+    await _pump(
+      tester,
+      const WeightButton(
+        index: 0,
+        unit: WeightUnit.lbs,
+        selected: false,
+        onPressed: null,
+      ),
+    );
+    expect(
+      find.descendant(
+        of: find.byType(WeightButton),
+        matching: find.byType(AnimatedContainer),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('forwards taps to onPressed', (tester) async {
     var taps = 0;
     await _pump(

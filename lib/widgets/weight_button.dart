@@ -37,24 +37,27 @@ class WeightButton extends StatelessWidget {
     final Color fill;
     final Color textColor;
     if (selected) {
-      fill = enabled
-          ? scheme.primary
-          : scheme.primary.withValues(alpha: 0.38);
-      textColor = enabled
-          ? scheme.onPrimary
-          : scheme.onPrimary.withValues(alpha: 0.6);
+      fill = enabled ? scheme.primary : scheme.primary.withValues(alpha: 0.38);
+      textColor =
+          enabled ? scheme.onPrimary : scheme.onPrimary.withValues(alpha: 0.6);
     } else {
       fill = enabled
           ? scheme.surfaceContainerHighest
           : scheme.surfaceContainerHighest.withValues(alpha: 0.5);
-      textColor = enabled
-          ? scheme.onSurface
-          : scheme.onSurface.withValues(alpha: 0.38);
+      textColor =
+          enabled ? scheme.onSurface : scheme.onSurface.withValues(alpha: 0.38);
     }
 
     final shape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(12),
     );
+
+    // Animation duration matches Material's "short3" emphasized-medium
+    // (150 ms) — enough to be perceptible without dragging on rapid
+    // weight changes. Easing is the standard fastOutSlowIn so the fill
+    // accelerates in and decelerates out, mirroring the rest of M3.
+    const animDur = Duration(milliseconds: 150);
+    const animCurve = Curves.fastOutSlowIn;
 
     // Workout app — the user's eyes are often on the equipment, not the
     // screen. Spell out the selected state for VoiceOver / TalkBack so
@@ -69,28 +72,39 @@ class WeightButton extends StatelessWidget {
       label: selected ? '$label, currently set' : label,
       onTap: onPressed,
       excludeSemantics: true,
-      child: Material(
-        color: fill,
-        shape: shape,
+      // AnimatedContainer tweens the [color] across selected/disabled
+      // transitions. Material's `animationDuration` would only tween
+      // the shadow — the fill is what the user sees.
+      child: AnimatedContainer(
+        duration: animDur,
+        curve: animCurve,
+        decoration: ShapeDecoration(color: fill, shape: shape),
         clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onPressed,
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              // FittedBox + scaleDown so the label shrinks to fit inside
-              // the tile at large text scales (a11y TextScaler up to ~2×
-              // and beyond) rather than clipping. softWrap:false keeps
-              // labels like "22.7 kg" on one line.
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  label,
-                  softWrap: false,
-                  maxLines: 1,
-                  style: TextStyle(
-                    color: textColor,
-                    fontWeight: FontWeight.w600,
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: onPressed,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                // FittedBox + scaleDown so the label shrinks to fit inside
+                // the tile at large text scales (a11y TextScaler up to ~2×
+                // and beyond) rather than clipping. softWrap:false keeps
+                // labels like "22.7 kg" on one line.
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: AnimatedDefaultTextStyle(
+                    duration: animDur,
+                    curve: animCurve,
+                    style: TextStyle(
+                      color: textColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    child: Text(
+                      label,
+                      softWrap: false,
+                      maxLines: 1,
+                    ),
                   ),
                 ),
               ),

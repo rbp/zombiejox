@@ -94,7 +94,8 @@ class _Card extends StatelessWidget {
     // for one frame before settling into "Connecting…". `state != null`
     // is "the device has at some point reported a state frame", i.e.
     // "was once truly connected".
-    final disconnected = connState == BleConnectionState.disconnected && state != null;
+    final disconnected =
+        connState == BleConnectionState.disconnected && state != null;
     final reconnecting = retryState != null;
     // "Connected at the BLE layer but no protocol-level state has
     // arrived yet" reads the same as initial connecting from the user's
@@ -152,6 +153,29 @@ class _Card extends StatelessWidget {
       bodyText = 'Idle';
     }
 
+    // Spinner is on whenever the protocol layer hasn't confirmed
+    // readiness — initial Connecting or supervisor-driven Reconnecting.
+    // It replaces the "—" weight placeholder so the right-hand cluster
+    // does double-duty: when we know the weight, show it; when we
+    // don't, show that we're working on it.
+    final showSpinner = connectingProto || reconnecting;
+
+    // Body text colour mirrors the chip colour for reconnecting +
+    // disconnected + moving; everything else uses the muted body-text
+    // tone. Pulled out so `AnimatedDefaultTextStyle` can tween it.
+    final Color bodyColor;
+    if (reconnecting) {
+      bodyColor = theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6) ??
+          scheme.onSurface;
+    } else if (disconnected) {
+      bodyColor = scheme.error;
+    } else if (motorActive) {
+      bodyColor = scheme.secondary;
+    } else {
+      bodyColor = theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6) ??
+          scheme.onSurface;
+    }
+
     return Material(
       color: scheme.surfaceContainerHighest,
       shape: RoundedRectangleBorder(
@@ -168,16 +192,24 @@ class _Card extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: theme.textTheme.titleMedium, overflow: TextOverflow.ellipsis),
+                  Text(name,
+                      style: theme.textTheme.titleMedium,
+                      overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 2),
-                  Text(
-                    bodyText,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: !reconnecting && disconnected
-                          ? scheme.error
-                          : !reconnecting && motorActive
-                              ? scheme.secondary
-                              : theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
+                  AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.fastOutSlowIn,
+                    style: (theme.textTheme.bodySmall ?? const TextStyle())
+                        .copyWith(color: bodyColor),
+                    // Cross-fade the body line when its content changes
+                    // (Connecting… → Idle → Moving… etc.) — the colour
+                    // is already tweening; tweening the text on top
+                    // smooths the whole transition.
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      transitionBuilder: (child, anim) =>
+                          FadeTransition(opacity: anim, child: child),
+                      child: Text(bodyText, key: ValueKey(bodyText)),
                     ),
                   ),
                 ],
@@ -187,7 +219,35 @@ class _Card extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(weight, style: theme.textTheme.titleLarge),
+                // Connecting-state glyph ↔ weight occupy the same slot —
+                // fixed height so the column doesn't jump as the icon
+                // appears/disappears. A static `bluetooth_searching`
+                // glyph rather than an indeterminate
+                // `CircularProgressIndicator`: the latter ticks
+                // forever, which would deadlock widget tests'
+                // `pumpAndSettle()`. The animation cue lives in the
+                // chip + body text crossfades; this glyph just signals
+                // "BLE activity here."
+                SizedBox(
+                  height: (theme.textTheme.titleLarge?.fontSize ?? 22) + 4,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    transitionBuilder: (child, anim) =>
+                        FadeTransition(opacity: anim, child: child),
+                    child: showSpinner
+                        ? Icon(
+                            Icons.bluetooth_searching,
+                            key: const ValueKey('connect-glyph'),
+                            size: 22,
+                            color: statusColor,
+                          )
+                        : Text(
+                            weight,
+                            key: ValueKey('weight-$weight'),
+                            style: theme.textTheme.titleLarge,
+                          ),
+                  ),
+                ),
                 if (battery != null)
                   Row(
                     mainAxisSize: MainAxisSize.min,
@@ -222,6 +282,11 @@ class _Card extends StatelessWidget {
 
 /// Small pill that communicates connection state at a glance. Sized to be
 /// readable next to the device name without crowding the row.
+///
+/// Animated: the fill / border colour tween via `AnimatedContainer` and
+/// the label cross-fades via `AnimatedSwitcher`. Net effect is that a
+/// Connecting → Connected → Moving transition feels continuous rather
+/// than three discrete flips.
 class _StatusChip extends StatelessWidget {
   final String label;
   final Color color;
@@ -231,9 +296,13 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final fontSize =
-        label.length <= 10 ? (theme.textTheme.labelSmall?.fontSize ?? 12) * 0.9 : theme.textTheme.labelSmall?.fontSize;
-    return Container(
+    final fontSize = label.length <= 10
+        ? (theme.textTheme.labelSmall?.fontSize ?? 12) * 0.9
+        : theme.textTheme.labelSmall?.fontSize;
+    const animDur = Duration(milliseconds: 200);
+    return AnimatedContainer(
+      duration: animDur,
+      curve: Curves.fastOutSlowIn,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       constraints: const BoxConstraints(maxWidth: 64, minWidth: 64),
       alignment: Alignment.center,
@@ -242,14 +311,27 @@ class _StatusChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: color.withValues(alpha: 0.6), width: 1),
       ),
-      child: Text(
-        label,
-        style: theme.textTheme.labelSmall?.copyWith(
+      child: AnimatedDefaultTextStyle(
+        duration: animDur,
+        curve: Curves.fastOutSlowIn,
+        style: (theme.textTheme.labelSmall ?? const TextStyle()).copyWith(
           color: color,
           fontWeight: FontWeight.w600,
           fontSize: fontSize,
         ),
-        overflow: TextOverflow.ellipsis,
+        child: AnimatedSwitcher(
+          duration: animDur,
+          transitionBuilder: (child, anim) =>
+              FadeTransition(opacity: anim, child: child),
+          // Per-label key so AnimatedSwitcher cross-fades on content
+          // change. Without the key the same Text instance would be
+          // re-used and the label would flip instantly.
+          child: Text(
+            label,
+            key: ValueKey(label),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
       ),
     );
   }

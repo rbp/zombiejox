@@ -120,8 +120,13 @@ void main() {
     expect(find.text('Idle'), findsNothing);
   });
 
-  testWidgets('em-dash placeholder when no state yet but connected',
-      (tester) async {
+  testWidgets(
+      'BLE-connected but no state frame yet → activity glyph (not the '
+      'old "—" weight placeholder)', (tester) async {
+    // §2b: the right-hand cluster shows a static
+    // `Icons.bluetooth_searching` glyph during Connecting /
+    // Reconnecting instead of the bare em-dash — communicates "BLE
+    // activity here" through context.
     final fake = _FakeDumbbell(_device('AA:01'));
     addTearDown(fake.dispose);
 
@@ -130,7 +135,10 @@ void main() {
     fake.emitConnected();
     await tester.pump();
 
-    expect(find.text('—'), findsOneWidget);
+    expect(find.byIcon(Icons.bluetooth_searching), findsOneWidget,
+        reason: 'connecting + no state ⇒ activity glyph slot');
+    expect(find.text('—'), findsNothing,
+        reason: 'em-dash replaced by the activity glyph');
   });
 
   testWidgets(

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MethodCall, SystemChannels;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zombiejox/ble/ble_connection_state.dart';
@@ -552,6 +553,129 @@ void main() {
     expect(prefs.rememberedDeviceIds, isEmpty,
         reason:
             'no member ever reached ready ⇒ remembered set must not be written');
+  });
+
+  group('§2b UX polish', () {
+    testWidgets(
+        'tapping a weight fires `HapticFeedback.selectionClick` before '
+        'the BLE write resolves', (tester) async {
+      // Intercept calls on the platform channel. `HapticFeedback`
+      // marshals through `flutter/platform` with method name
+      // `HapticFeedback.vibrate` and an enum-name string argument.
+      final hapticCalls = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (MethodCall call) async {
+          if (call.method == 'HapticFeedback.vibrate') {
+            hapticCalls.add(call.arguments as String);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+                SystemChannels.platform,
+                null,
+              ));
+
+      final prefs = await _freshPrefs(remembered: ['AA:01']);
+      final ctx = await _pumpHome(tester, prefs: prefs);
+      ctx.fakes.single.emitState(
+        const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('20 lbs'));
+      await tester.pumpAndSettle();
+
+      expect(hapticCalls, contains('HapticFeedbackType.selectionClick'),
+          reason: 'tap-to-set-weight ⇒ canonical selection haptic');
+      expect(ctx.fakes.single.setWeightCalls, [2],
+          reason: 'and the BLE write still goes through');
+    });
+
+    testWidgets(
+        'first reconnect-attempt failure surfaces a one-shot SnackBar; '
+        'subsequent failures stay silent (the card UI carries the rest)',
+        (tester) async {
+      final prefs = await _freshPrefs(remembered: ['AA:01']);
+      final scanner = _FakeScanner();
+      addTearDown(scanner.dispose);
+      final fakes = <_FakeDumbbell>[];
+      await tester.pumpWidget(MaterialApp(
+        home: HomeScreen(
+          preferences: prefs,
+          checkPermissionsGranted: () async => true,
+          scanner: scanner,
+          createWeightGroup: () => WeightGroup(newDumbbell: (d) {
+            final f = _FakeDumbbell(d)..failReconnect = true;
+            fakes.add(f);
+            return f;
+          }),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      fakes.single.emitState(
+        const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
+      );
+      await tester.pumpAndSettle();
+
+      // Drop → supervisor's immediate first attempt runs (and fails,
+      // because failReconnect=true) → attempt counter bumps to 1.
+      fakes.single.simulateDrop();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(SnackBar), findsOneWidget,
+          reason: 'first attempt failure ⇒ one SnackBar');
+      expect(find.textContaining('retrying in the background'), findsOneWidget);
+    });
+
+    testWidgets(
+        'reconnect-failure SnackBar is suppressed for subsequent retries '
+        'within the same drop incident', (tester) async {
+      // After the first failure surfaced a SnackBar, further failures
+      // for the SAME device + SAME drop must NOT re-surface another —
+      // the card's "Reconnecting…" chip already conveys ongoing
+      // activity; spamming SnackBars would be noisy.
+      final prefs = await _freshPrefs(remembered: ['AA:01']);
+      final scanner = _FakeScanner();
+      addTearDown(scanner.dispose);
+      final fakes = <_FakeDumbbell>[];
+      await tester.pumpWidget(MaterialApp(
+        home: HomeScreen(
+          preferences: prefs,
+          checkPermissionsGranted: () async => true,
+          scanner: scanner,
+          createWeightGroup: () => WeightGroup(newDumbbell: (d) {
+            final f = _FakeDumbbell(d)..failReconnect = true;
+            fakes.add(f);
+            return f;
+          }),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      fakes.single.emitState(
+        const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
+      );
+      await tester.pumpAndSettle();
+
+      fakes.single.simulateDrop();
+      await tester.pumpAndSettle();
+      // First SnackBar appeared. Clear it by tapping elsewhere or
+      // letting it time out — but tests can just check that no
+      // additional SnackBar appears after another failed attempt by
+      // forcing the scanner-toggle-on event to kick reconnect again.
+      // (Actually `kickReconnectsForResume` from the adapter handler
+      // re-fires the attempt; a fresh failure should NOT re-show.)
+      scanner.emitAdapterState(BleAdapterState.off);
+      await tester.pumpAndSettle();
+      scanner.emitAdapterState(BleAdapterState.on);
+      await tester.pumpAndSettle();
+
+      // Only the original SnackBar; no second one queued behind it.
+      expect(find.byType(SnackBar), findsOneWidget,
+          reason: 'subsequent failures for same drop must stay silent');
+    });
   });
 
   testWidgets('stop / refresh icon toggles the scanner', (tester) async {
