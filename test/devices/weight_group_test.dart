@@ -1087,6 +1087,41 @@ void main() {
     });
 
     test(
+        'a second `disconnected` event arriving during the `attempting` '
+        'phase does NOT trigger a concurrent reconnect attempt', () async {
+      // Defense-in-depth: the connectionState listener filters
+      // `attempting` events out, and `_attemptReconnect` itself
+      // double-checks. Verify both guards by emitting a stray
+      // disconnect mid-reconnect.
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d)..delayReconnect();
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      fakes.single.emitState(const DumbbellState(
+          weightIndex: 0, motorActive: false, batteryPct: 80));
+      await pumpEventQueue();
+
+      fakes.single.simulateDrop();
+      await pumpEventQueue();
+      // First attempt is in flight, gated on reconnectGate.
+      expect(fakes.single.reconnectCallCount, 1);
+
+      // Stray second disconnect (e.g. from the underlying _ble's
+      // teardown emitting one more event before the swap completes).
+      fakes.single._conn.add(BleConnectionState.disconnected);
+      await pumpEventQueue();
+
+      expect(fakes.single.reconnectCallCount, 1,
+          reason: 'attempting-phase guards must suppress the duplicate');
+
+      fakes.single.completeReconnect();
+      await pumpEventQueue();
+    });
+
+    test(
         'setWeightIndex during reconnect skips the reconnecting member '
         'and reaches still-ready peers', () async {
       final fakes = <FakeDumbbell>[];

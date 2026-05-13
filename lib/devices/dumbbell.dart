@@ -51,6 +51,14 @@ class Dumbbell {
   );
   StreamSubscription<BleConnectionState>? _connFwd;
 
+  /// True once [_wireConnForwarder] has run at least once — i.e. the
+  /// `late final` [_connStateController] has been initialized and a
+  /// listener has caused us to subscribe to [_ble.connectionState]. The
+  /// flag is durable across an onCancel → onListen flap (which nulls
+  /// out [_connFwd]), so [disconnect] knows whether the controller
+  /// needs closing even if no listener is currently attached.
+  bool _connControllerEverWired = false;
+
   DumbbellState? _last;
   DumbbellState? get lastState => _last;
 
@@ -98,6 +106,11 @@ class Dumbbell {
   /// Wired by the controller's `onListen` callback and re-run after a
   /// [reconnect] transport swap so subscribers keep seeing live events.
   void _wireConnForwarder() {
+    // A late listener attaching after [disconnect] would otherwise
+    // re-subscribe to a (possibly torn-down) `_ble.connectionState`.
+    // Bail — the controller is being or has been closed.
+    if (_disposed) return;
+    _connControllerEverWired = true;
     final old = _connFwd;
     if (old != null) unawaited(old.cancel());
     _connFwd = _ble.connectionState.listen((s) {
@@ -215,13 +228,6 @@ class Dumbbell {
       await _rxSub?.cancel();
     } catch (_) {/* best-effort */}
     _rxSub = null;
-    // Capture whether the conn-state controller has been initialized
-    // BEFORE we null out _connFwd. _connFwd non-null implies
-    // _wireConnForwarder ran, which only runs via the controller's
-    // `onListen` — so the controller has been initialized. The `late
-    // final` is otherwise lazy: fakes that override `connectionState`
-    // never touch it, and we don't want to force a useless init here.
-    final controllerInitialized = _connFwd != null;
     try {
       await _connFwd?.cancel();
     } catch (_) {/* best-effort */}
@@ -232,7 +238,13 @@ class Dumbbell {
     try {
       if (!_states.isClosed) await _states.close();
     } catch (_) {/* best-effort */}
-    if (controllerInitialized) {
+    // Close the conn-state controller iff it has ever been wired —
+    // i.e. some listener once attached and forced the `late final` to
+    // initialize. Reading `_connFwd != null` here would be wrong: a
+    // listener that attached and then cancelled (onCancel nulls
+    // [_connFwd]) would leave the controller alive but unclosed.
+    // [_connControllerEverWired] is durable across that flap.
+    if (_connControllerEverWired) {
       try {
         if (!_connStateController.isClosed) {
           await _connStateController.close();

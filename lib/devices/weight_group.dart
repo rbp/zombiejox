@@ -554,6 +554,11 @@ class WeightGroup {
     if (_disposed || !_consumerStillCares(db)) return;
     final existing = _retryStates[db];
     if (existing == null) return;
+    // Defense-in-depth: callers (the backoff Timer + kickReconnectsForResume)
+    // already filter out members whose phase is `attempting`, but make the
+    // invariant local so a future caller can't accidentally double-fire
+    // `db.reconnect()` against the same member while one is in flight.
+    if (existing.phase == RetryPhase.attempting) return;
     _retryTimers.remove(db);
     _retryStates[db] = RetryState(
       phase: RetryPhase.attempting,
