@@ -7,9 +7,9 @@ import 'package:url_launcher/url_launcher.dart';
 /// Layout (§2c of IMPLEMENTATION_PLAN.md):
 ///   1. Logo + app name + tagline at the top.
 ///   2. "What it is" pitch.
-///   3. GitHub link + "Rodrigo Pimentel \<rbp@isnomore.net\> started
-///      this project." — both tappable rows that hand off to the OS via
-///      `url_launcher`.
+///   3. GitHub link + "Created by Rodrigo Pimentel \<rbp@isnomore.net\>"
+///      — both rows hand off to the OS via `url_launcher`. The GitHub
+///      row is fully tappable; on the author row only the email span is.
 ///   4. Credits / Protocol / License / Disclaimer.
 class AboutScreen extends StatelessWidget {
   /// Override the URL launcher — used by widget tests to avoid the
@@ -142,9 +142,9 @@ class AboutScreen extends StatelessWidget {
   }
 }
 
-/// "Rodrigo Pimentel \<rbp@isnomore.net\> started this project." with
-/// ONLY the email span tappable — the surrounding text and the leading
-/// person icon are inert. Uses [WidgetSpan] + [InkWell] (rather than
+/// "Created by Rodrigo Pimentel \<rbp@isnomore.net\>" with ONLY the
+/// email span tappable — the surrounding text and the leading person
+/// icon are inert. Uses [WidgetSpan] + [InkWell] (rather than
 /// `Text.rich` + `TapGestureRecognizer`) so we don't have to manage the
 /// recognizer's lifecycle from a parent state.
 class _AuthorLine extends StatelessWidget {
@@ -173,7 +173,7 @@ class _AuthorLine extends StatelessWidget {
               TextSpan(
                 style: baseStyle,
                 children: [
-                  const TextSpan(text: 'Rodrigo Pimentel <'),
+                  const TextSpan(text: 'Created by Rodrigo Pimentel <'),
                   WidgetSpan(
                     alignment: PlaceholderAlignment.baseline,
                     baseline: TextBaseline.alphabetic,
@@ -192,7 +192,7 @@ class _AuthorLine extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const TextSpan(text: '> started this project.'),
+                  const TextSpan(text: '>'),
                 ],
               ),
             ),

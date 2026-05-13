@@ -59,9 +59,8 @@ void main() {
     expect(find.byType(Image), findsOneWidget,
         reason: 'logo above the app name');
     expect(find.textContaining('github.com/rbp/zombiejox'), findsOneWidget);
-    expect(find.textContaining('Rodrigo Pimentel'), findsOneWidget);
+    expect(find.textContaining('Created by Rodrigo Pimentel'), findsOneWidget);
     expect(find.text('rbp@isnomore.net'), findsOneWidget);
-    expect(find.textContaining('started this project'), findsOneWidget);
   });
 
   testWidgets('tapping the GitHub row launches the repo URL', (tester) async {

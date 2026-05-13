@@ -236,7 +236,7 @@ Restructured the About screen per the spec below:
 
 - Logo (`assets/icon-1024.png`, the cream-background launcher icon, clipped to a rounded rectangle) above the app name + tagline.
 - "What it is" pitch unchanged.
-- Two new tappable rows below it: a GitHub link (`github.com/rbp/zombiejox`) and a "Rodrigo Pimentel \<rbp@isnomore.net\> started this project." row. Both launch the OS handler via `url_launcher` (new dependency); a failing launch surfaces a SnackBar rather than an uncaught error.
+- Two new rows below it: a fully-tappable GitHub link (`github.com/rbp/zombiejox`) and a "Created by Rodrigo Pimentel \<rbp@isnomore.net\>" row where only the email span is tappable (the surrounding text and the leading icon are inert). Both launch the OS handler via `url_launcher` (new dependency); a failing launch surfaces a SnackBar rather than an uncaught error.
 - Existing Credits / Protocol / License / Disclaimer sections kept verbatim.
 
 Test seam: `AboutScreen.launchUri` accepts a `Future<bool> Function(Uri)` override so widget tests can assert on the URIs without hitting the `url_launcher` platform channel.
