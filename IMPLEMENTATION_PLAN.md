@@ -86,6 +86,7 @@ Runtime:
 - `flutter_blue_plus: ^2.3.1` — BLE.
 - `permission_handler: ^12.0.1` — Bluetooth scan/connect permission.
 - `shared_preferences: ^2.3.0` — units, remembered-device IDs, explicit-choice flag.
+- `url_launcher: ^6.3.1` — opens external URLs (the About screen's GitHub link and `mailto:` author email) via the OS handler.
 - `cupertino_icons: ^1.0.8` (default Flutter cruft).
 
 Dev:
@@ -370,7 +371,7 @@ The unit + widget test suites cover the pure-Dart and Flutter-widget layers, but
 - Tap × on a top card: dumbbell disconnects, slot drops, scanner keeps running. If you do it while still `connecting`, the racing connect doesn't resurrect the slot.
 - Tap weight buttons → physically moves the dumbbell(s) to that setting. Extremes "8 lbs" / "50 lbs" both work.
 - Switching to kg in Settings re-labels every weight tile live **without** a navigation round-trip (validates the reactive `Preferences.unit` listener).
-- About screen renders with credits, license, disclaimer, and the `docs/ble_protocol.md` reference visible without scrolling jankiness.
+- About screen renders: logo at the top (cream-background app icon, rounded, crisp on a high-DPR device — the `cacheWidth` / `cacheHeight` plumbing should decode at display size), app name + tagline, "What it is", a tappable GitHub row, a "Created by Rodrigo Pimentel <rbp@isnomore.net>" line where **only the email span is tappable** (icon + surrounding text inert), and the Credits / Protocol / License / Disclaimer sections readable without scrolling jankiness. Tap GitHub → browser opens to the repo; tap email → mail composer pre-filled to `rbp@isnomore.net`.
 - **Warm-start**: after a verified connect, kill the app and relaunch. The Home screen seeds the top region with the previously-connected dumbbells in `connecting` state on the first frame; the scanner also starts immediately. No flash of an empty top region.
 - On the warm-start path, if a remembered dumbbell is out of range / offline, the `FailedDeviceCard` appears with a refresh icon for retry and an × for dismissal.
 - Battery percentage on each card matches what nRF Connect shows for the same device.
