@@ -94,8 +94,7 @@ class _Card extends StatelessWidget {
     // for one frame before settling into "Connecting…". `state != null`
     // is "the device has at some point reported a state frame", i.e.
     // "was once truly connected".
-    final disconnected =
-        connState == BleConnectionState.disconnected && state != null;
+    final disconnected = connState == BleConnectionState.disconnected && state != null;
     final reconnecting = retryState != null;
     // "Connected at the BLE layer but no protocol-level state has
     // arrived yet" reads the same as initial connecting from the user's
@@ -169,7 +168,7 @@ class _Card extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: theme.textTheme.titleMedium),
+                  Text(name, style: theme.textTheme.titleMedium, overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 2),
                   Text(
                     bodyText,
@@ -178,13 +177,13 @@ class _Card extends StatelessWidget {
                           ? scheme.error
                           : !reconnecting && motorActive
                               ? scheme.secondary
-                              : theme.textTheme.bodySmall?.color
-                                  ?.withValues(alpha: 0.6),
+                              : theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                     ),
                   ),
                 ],
               ),
             ),
+            const SizedBox(width: 8),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -232,8 +231,12 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final fontSize =
+        label.length <= 10 ? (theme.textTheme.labelSmall?.fontSize ?? 12) * 0.9 : theme.textTheme.labelSmall?.fontSize;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      constraints: const BoxConstraints(maxWidth: 64, minWidth: 64),
+      alignment: Alignment.center,
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(999),
@@ -244,7 +247,9 @@ class _StatusChip extends StatelessWidget {
         style: theme.textTheme.labelSmall?.copyWith(
           color: color,
           fontWeight: FontWeight.w600,
+          fontSize: fontSize,
         ),
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }

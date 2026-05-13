@@ -65,6 +65,7 @@ class FailedDeviceCard extends StatelessWidget {
                 ],
               ),
             ),
+            const SizedBox(width: 8),
             IconButton(
               icon: const Icon(Icons.refresh),
               tooltip: 'Try again — $error',
@@ -96,8 +97,13 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final fontSize =
+        label.length <= 10 ? (theme.textTheme.labelSmall?.fontSize ?? 12) * 0.9 : theme.textTheme.labelSmall?.fontSize;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      constraints: const BoxConstraints(maxWidth: 64, minWidth: 64),
+      alignment: Alignment.center,
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(999),
@@ -108,6 +114,7 @@ class _StatusChip extends StatelessWidget {
         style: theme.textTheme.labelSmall?.copyWith(
           color: color,
           fontWeight: FontWeight.w600,
+          fontSize: fontSize,
         ),
       ),
     );
