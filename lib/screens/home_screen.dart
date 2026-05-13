@@ -34,8 +34,8 @@ import 'settings_screen.dart';
 ///   the bottom list sits a stop/refresh icon for the scanner.
 ///
 /// Per-device removal lives on the cards themselves (the "×"
-/// affordance). Bulk removal (the AppBar's bluetooth-off icon) clears
-/// every selected device without leaving the screen.
+/// affordance) — there's no bulk-disconnect action; with promote-on-tap
+/// and per-card ×, an N-dumbbell setup is N taps either way.
 ///
 /// All seams (scanner, group factory, permission check) accept overrides
 /// so widget tests can run without touching the platform channels.
@@ -182,15 +182,7 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Feed the auto-matcher the current snapshot. `attemptedCount`
   /// reflects the user's intent for the active session — failed and
   /// connecting devices both live in `_selectedDevices`.
-  ///
-  /// **Bail when `_selectedDevices` is empty** so the intermediate
-  /// snapshots emitted during "Disconnect all" (cleared selected list
-  /// + still-non-empty knownUnitCount on the in-flight snapshots from
-  /// `WeightGroup.remove`) don't trick the matcher into deciding
-  /// `0 + 0 >= 0` "all accounted for" and firing a spurious "Unit set
-  /// to X" SnackBar against an abandoned session.
   void _tickAutoMatcher() {
-    if (_selectedDevices.isEmpty) return;
     _autoMatcher.tick((
       knownUnits: _snapshot.knownUnits,
       knownUnitCount: _snapshot.knownUnitCount,
@@ -246,17 +238,6 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _selectedDevices.remove(device));
     _persistRememberedIfVerified();
     await _group.remove(device);
-  }
-
-  /// User tapped the AppBar's "Disconnect all". Drop every selected
-  /// device — composed from the per-device [_onRemove] so we don't need
-  /// a parallel "reset everything" code path. The group stays alive so
-  /// the user can keep scanning and pick new devices.
-  Future<void> _onDisconnectAll() async {
-    final toRemove = List<DeviceRef>.from(_selectedDevices);
-    setState(() => _selectedDevices.clear());
-    _persistRememberedIfVerified();
-    await Future.wait([for (final d in toRemove) _group.remove(d)]);
   }
 
   Future<void> _startScan() async {
@@ -331,12 +312,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 builder: (_) => SettingsScreen(preferences: widget.preferences),
               ),
             ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.bluetooth_disabled),
-            tooltip: 'Disconnect all',
-            onPressed:
-                _selectedDevices.isEmpty ? null : _onDisconnectAll,
           ),
         ],
       ),

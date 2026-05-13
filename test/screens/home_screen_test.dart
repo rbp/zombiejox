@@ -325,26 +325,6 @@ void main() {
   });
 
   testWidgets(
-      '"Disconnect all" disconnects every selected member and resets the '
-      'top region without leaving the screen', (tester) async {
-    final prefs = await _freshPrefs(remembered: ['AA:01', 'AA:02']);
-    final ctx = await _pumpHome(tester, prefs: prefs);
-    expect(find.byType(DumbbellCard), findsNWidgets(2));
-
-    await tester.tap(find.byTooltip('Disconnect all'));
-    await tester.pumpAndSettle();
-
-    expect(find.byType(DumbbellCard), findsNothing);
-    expect(find.text('Tap a dumbbell below to connect'), findsOneWidget);
-    for (final f in ctx.fakes) {
-      expect(f.disconnectCalled, isTrue);
-    }
-    // Screen is still alive — the user can pick again. Confirm by
-    // checking the weight grid is still rendered.
-    expect(find.byType(WeightButton), findsNWidgets(8));
-  });
-
-  testWidgets(
       'weight buttons enable as soon as ANY member is ready; tap fans out '
       'only to ready members', (tester) async {
     final prefs = await _freshPrefs(remembered: ['AA:01', 'AA:02']);
@@ -460,46 +440,6 @@ void main() {
 
     expect(prefs.unit.value, WeightUnit.kg);
     expect(find.textContaining('Unit set to kg'), findsOneWidget);
-  });
-
-  testWidgets(
-      'auto-match does NOT fire on the intermediate snapshots emitted '
-      'during "Disconnect all" — user has signalled abandonment',
-      (tester) async {
-    // Regression: the matcher sees `attemptedCount = _selectedDevices.length`
-    // and `_selectedDevices` is cleared BEFORE the per-device removes
-    // emit their snapshots. Without the bail-on-empty guard, the
-    // matcher would see knownUnitCount > 0 & attemptedCount = 0, satisfy
-    // "all accounted for" trivially, and fire a spurious "Unit set to X"
-    // SnackBar against the abandoned session.
-    final prefs = await _freshPrefs(
-      unit: 'lbs',
-      remembered: ['AA:01', 'AA:02'],
-    );
-    final ctx = await _pumpHome(tester, prefs: prefs);
-
-    // Only one member emits a unit, and it disagrees with the current
-    // app setting (lbs). The other stays connecting — so the matcher's
-    // debounce is armed but hasn't fired yet.
-    ctx.fakes[0].emitState(const DumbbellState(
-      weightIndex: 0,
-      motorActive: false,
-      batteryPct: 80,
-      unitRaw: 0x01, // kg
-    ));
-    // Pump just enough that the snapshot lands but well under the
-    // 1.5s debounce window.
-    await tester.pump(const Duration(milliseconds: 200));
-    expect(prefs.unit.value, WeightUnit.lbs);
-
-    // User abandons the session.
-    await tester.tap(find.byTooltip('Disconnect all'));
-    await tester.pumpAndSettle();
-
-    expect(prefs.unit.value, WeightUnit.lbs,
-        reason: 'abandoned session ⇒ no unit nudge');
-    expect(find.byType(SnackBar), findsNothing,
-        reason: 'no spurious "Unit set to kg" SnackBar');
   });
 
   testWidgets(
