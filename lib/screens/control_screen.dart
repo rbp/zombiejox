@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import '../ble/device_ref.dart';
 import '../devices/dumbbell.dart';
 import '../devices/weight_group.dart';
-import '../protocol/dumbbell_state.dart';
 import '../state/preferences.dart';
 import '../state/unit_auto_matcher.dart';
 import '../state/weights.dart';
@@ -15,10 +14,13 @@ import '../widgets/weight_button.dart';
 import 'settings_screen.dart';
 
 /// Screen for controlling N connected dumbbells. The membership comes in
-/// as [devices]; the screen owns the [WeightGroup] lifecycle.
+/// as [devices]; the screen owns the [WeightGroup] lifecycle and is a
+/// pure projection of [WeightGroup.snapshots] — no per-dumbbell stream
+/// subscriptions, no failed-devices bookkeeping, no consensus / motor /
+/// unit derivations of its own.
 ///
-/// Tests can override [createWeightGroup] to inject a [WeightGroup] with a
-/// fake-dumbbell factory.
+/// Tests can override [createWeightGroup] to inject a [WeightGroup] with
+/// a fake-dumbbell factory.
 class ControlScreen extends StatefulWidget {
   final List<DeviceRef> devices;
   final Preferences preferences;
@@ -46,17 +48,8 @@ class ControlScreen extends StatefulWidget {
 class _ControlScreenState extends State<ControlScreen> {
   late final WeightGroup _group =
       widget.createWeightGroup?.call() ?? WeightGroup();
-  // Devices whose most recent connect attempt threw. Each entry persists
-  // until the user taps refresh and the connect either succeeds (entry
-  // removed when the device joins the group) or fails again (entry
-  // replaced). Rendered in-place — the device's slot in the list stays put;
-  // only the card *content* swaps between FailedDeviceCard and DumbbellCard.
-  final Map<DeviceRef, Object> _failedDevices = {};
-  StreamSubscription<List<Dumbbell>>? _changesSub;
-  // Per-dumbbell state subscriptions. We trigger setState on every emission
-  // so derived values like `_allReady` and the consensus weight refresh
-  // promptly — `_group.changes` only fires on membership changes.
-  final Map<Dumbbell, StreamSubscription<DumbbellState>> _stateSubs = {};
+  StreamSubscription<GroupSnapshot>? _snapshotSub;
+  GroupSnapshot _snapshot = GroupSnapshot.empty;
   bool _onAnyConnectedFired = false;
 
   late final UnitAutoMatcher _autoMatcher = UnitAutoMatcher(
@@ -67,73 +60,39 @@ class _ControlScreenState extends State<ControlScreen> {
   @override
   void initState() {
     super.initState();
-    _changesSub = _group.changes.listen(_onMembership);
+    _snapshot = _group.lastSnapshot;
+    _snapshotSub = _group.snapshots.listen(_onSnapshot);
     for (final d in widget.devices) {
       _addOne(d);
     }
   }
 
-  void _onMembership(List<Dumbbell> current) {
-    final asSet = current.toSet();
-    // Drop subscriptions for removed members.
-    final removed = _stateSubs.keys
-        .where((d) => !asSet.contains(d))
-        .toList(growable: false);
-    for (final d in removed) {
-      _stateSubs.remove(d)?.cancel();
-    }
-    // Subscribe to newly-added members. Each subscription keeps a private
-    // `lastSeen` so a no-op `0xD2` (same weightIndex, same motor state)
-    // doesn't trigger a screen-wide rebuild. Real devices broadcast
-    // `0xD2` ~1 Hz; without this filter the whole `_Body` (every card,
-    // the 8-button grid) would rebuild once per second per connected
-    // dumbbell forever.
-    for (final d in current) {
-      _stateSubs.putIfAbsent(d, () {
-        DumbbellState? lastSeen = d.lastState;
-        return d.states.listen((next) {
-          if (next == lastSeen) return;
-          lastSeen = next;
-          if (mounted) setState(() {});
-          _maybeFireOnAnyConnected();
-          _tickAutoMatcher();
-        });
-      });
-    }
-    if (mounted) setState(() {});
+  void _onSnapshot(GroupSnapshot snapshot) {
+    if (!mounted) return;
+    setState(() => _snapshot = snapshot);
     _maybeFireOnAnyConnected();
     _tickAutoMatcher();
   }
 
-  /// Fires [ControlScreen.onAnyConnected] exactly once, the first time any
-  /// member reaches [Dumbbell.isReady]. Hooked from both [_onMembership]
-  /// (in case a member is already ready when membership changes) and each
-  /// per-member state-stream listener (the usual path — `isReady` becomes
-  /// true when the first `0xD2` state notification arrives).
+  /// Fires [ControlScreen.onAnyConnected] exactly once, the first time
+  /// any member reaches [Dumbbell.isReady]. Reads off the snapshot so
+  /// it sees every transition `WeightGroup` emits — membership add,
+  /// state-frame arrival, retry success.
   void _maybeFireOnAnyConnected() {
     if (_onAnyConnectedFired) return;
-    if (!_group.dumbbells.any((d) => d.isReady)) return;
+    if (!_snapshot.anyReady) return;
     _onAnyConnectedFired = true;
     widget.onAnyConnected?.call();
   }
 
-  /// Compute a [UnitsSnapshot] of the current group state and feed it to
-  /// [UnitAutoMatcher.tick]. Hooked from membership changes, every
-  /// per-member state-stream emission, and the connect-failure path.
+  /// Feed the matcher the current snapshot. `failedCount` comes from
+  /// the snapshot's failed map; `attemptedCount` is the original
+  /// selection (screen-level info the group can't know about).
   void _tickAutoMatcher() {
-    final knownUnits = <WeightUnit>{};
-    var knownUnitCount = 0;
-    for (final d in _group.dumbbells) {
-      if (!d.isReady) continue;
-      final u = weightUnitFromRawByte(d.lastState?.unitRaw);
-      if (u == null) continue;
-      knownUnits.add(u);
-      knownUnitCount++;
-    }
     _autoMatcher.tick((
-      knownUnits: knownUnits,
-      knownUnitCount: knownUnitCount,
-      failedCount: _failedDevices.length,
+      knownUnits: _snapshot.knownUnits,
+      knownUnitCount: _snapshot.knownUnitCount,
+      failedCount: _snapshot.failed.length,
       attemptedCount: widget.devices.length,
     ));
   }
@@ -159,49 +118,32 @@ class _ControlScreenState extends State<ControlScreen> {
   }
 
   Future<void> _addOne(DeviceRef device) async {
-    // We deliberately don't pre-clear an existing _failedDevices entry: the
-    // dumbbell is added to _group synchronously inside _group.add() before
-    // the first await, so by the next build dumbbellByDevice already has it
-    // and the DumbbellCard preempts the FailedDeviceCard via _cardFor's
-    // ordering. Clearing eagerly would briefly leave the slot in neither
-    // map and collapse it (the SizedBox.shrink fallback) for one frame.
+    // WeightGroup owns the failure-as-snapshot pipeline; the screen just
+    // asks for an attempt and reacts to the next emitted snapshot. The
+    // only thing add() can throw is StateError-after-disposal — caused
+    // by a retry tap racing the dispose-all flow during teardown; we
+    // can safely ignore it because the screen is on its way out anyway.
     try {
       await _group.add(device);
-      if (!mounted) return;
-      // Connect succeeded — drop any stale failed entry from a prior attempt.
-      if (_failedDevices.containsKey(device)) {
-        setState(() => _failedDevices.remove(device));
-      }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _failedDevices[device] = e);
-      // A failure changes the "all accounted for" calculus the auto-
-      // matcher reads, so tick it again. If at least one member is
-      // already ready and the rest are now all failed, the matcher
-      // decides immediately instead of waiting on the debounce.
-      _tickAutoMatcher();
+    } on StateError {
+      // Group disposed mid-flight; nothing to recover.
     }
   }
 
   @override
   void dispose() {
-    // dispose() can't be async, so each Future is explicitly fire-and-forget
-    // via `unawaited`. cancel() / disconnectAll() can't meaningfully fail in
-    // a way the user can recover from; we just need to release resources.
+    // dispose() can't be async, so each Future is explicitly fire-and-
+    // forget via `unawaited`. cancel() / disconnectAll() can't
+    // meaningfully fail in a way the user can recover from; we just
+    // need to release resources.
     _autoMatcher.dispose();
-    unawaited(_changesSub?.cancel() ?? Future<void>.value());
-    for (final s in _stateSubs.values) {
-      unawaited(s.cancel());
-    }
-    _stateSubs.clear();
+    unawaited(_snapshotSub?.cancel() ?? Future<void>.value());
     unawaited(_group.disconnectAll());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final dumbbells = _group.dumbbells;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('ZombieJox'),
@@ -233,9 +175,8 @@ class _ControlScreenState extends State<ControlScreen> {
             constraints: const BoxConstraints(maxWidth: 600),
             child: _Body(
               orderedDevices: widget.devices,
-              dumbbells: dumbbells,
+              snapshot: _snapshot,
               unit: unit,
-              failedDevices: _failedDevices,
               onSelectIndex: _onSelectIndex,
               onRetry: _addOne,
             ),
@@ -267,58 +208,28 @@ class _ControlScreenState extends State<ControlScreen> {
 
 class _Body extends StatelessWidget {
   // The devices in their original selection order. Cards render in this
-  // order regardless of connection state, so a failed card retrying — which
-  // briefly removes it from `failedDevices` and adds it to `dumbbells` —
-  // doesn't visually move it past its neighbours.
+  // order regardless of connection state, so a failed card retrying —
+  // which moves the device from `snapshot.failed` back to
+  // `snapshot.connected` — doesn't visually move it past its
+  // neighbours.
   final List<DeviceRef> orderedDevices;
-  final List<Dumbbell> dumbbells;
+  final GroupSnapshot snapshot;
   final WeightUnit unit;
-  final Map<DeviceRef, Object> failedDevices;
   final Future<void> Function(int) onSelectIndex;
   final Future<void> Function(DeviceRef) onRetry;
 
   const _Body({
     required this.orderedDevices,
-    required this.dumbbells,
+    required this.snapshot,
     required this.unit,
-    required this.failedDevices,
     required this.onSelectIndex,
     required this.onRetry,
   });
 
-  /// The currently-selected weight index, **looking only at ready members**.
-  /// Returns null when no member is ready yet, or when ready members
-  /// disagree (e.g. one was set manually via the dock buttons after being
-  /// connected). Not-ready members are ignored so a single offline dumbbell
-  /// doesn't suppress the indicator for the rest of the group.
-  int? _consensusIndex() {
-    int? agreed;
-    for (final d in dumbbells) {
-      final s = d.lastState;
-      if (s == null) continue;
-      if (agreed == null) {
-        agreed = s.weightIndex;
-      } else if (agreed != s.weightIndex) {
-        return null;
-      }
-    }
-    return agreed;
-  }
-
-  /// Any ready dumbbell currently moving its motor?
-  bool _anyMoving() => dumbbells.any((d) => d.lastState?.motorActive ?? false);
-
-  /// At least one member has finished connecting and is safe to write to.
-  /// Set-weight is enabled as soon as this is true — not-ready members are
-  /// silently skipped by [WeightGroup.setWeightIndex], so an offline
-  /// dumbbell never blocks the rest. Each card still shows its own
-  /// "Connecting…" / "Idle" / "Moving…" state.
-  bool _anyReady() => dumbbells.any((d) => d.isReady);
-
-  /// Returns the card that belongs in [device]'s slot right now. Distinct
-  /// [ValueKey]s per state make [AnimatedSwitcher] treat the connected ↔
-  /// failed transitions as a real swap (and cross-fade them) instead of a
-  /// no-op rebuild of the same widget.
+  /// Returns the card that belongs in [device]'s slot right now.
+  /// Distinct [ValueKey]s per state make [AnimatedSwitcher] treat the
+  /// connected ↔ failed transitions as a real swap (and cross-fade
+  /// them) instead of a no-op rebuild of the same widget.
   Widget _cardFor(
     DeviceRef device,
     Map<DeviceRef, Dumbbell> dumbbellByDevice,
@@ -331,7 +242,7 @@ class _Body extends StatelessWidget {
         unit: unit,
       );
     }
-    final error = failedDevices[device];
+    final error = snapshot.failed[device];
     if (error != null) {
       return FailedDeviceCard(
         key: ValueKey('failed-${device.id}'),
@@ -340,11 +251,11 @@ class _Body extends StatelessWidget {
         onRetry: () => onRetry(device),
       );
     }
-    // Should be unreachable: _addOne keeps the failed entry in place until
-    // _group.add either succeeds (dumbbell now in dumbbellByDevice) or fails
-    // (failed entry replaced atomically in the same setState as the removal
-    // from the group). Kept as a defensive zero-height fallback — a visible
-    // placeholder here would itself be the bug.
+    // Unreachable in practice: WeightGroup.add atomically drops the
+    // failed entry the moment the retry's dumbbell lands in `connected`,
+    // so the slot never falls into the "neither map" pocket. Kept as a
+    // defensive zero-height fallback — a visible placeholder here would
+    // itself be the bug.
     return SizedBox.shrink(
       key: ValueKey('pending-${device.id}'),
     );
@@ -352,17 +263,17 @@ class _Body extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final selected = _consensusIndex();
-    final moving = _anyMoving();
-    final canPress = _anyReady() && !moving;
+    final selected = snapshot.consensusIndex;
+    final canPress = snapshot.anyReady && !snapshot.anyMoving;
 
-    // Cards render in [orderedDevices] order so a device retrying — which
-    // briefly leaves [failedDevices] before reappearing in [dumbbells] —
-    // doesn't shuffle past its neighbours. AnimatedSwitcher cross-fades
-    // the card *content* when a device flips between failed / connecting /
-    // connected, while the slot stays put.
+    // Cards render in [orderedDevices] order so a device retrying —
+    // which briefly leaves snapshot.failed before reappearing in
+    // snapshot.connected — doesn't shuffle past its neighbours.
+    // AnimatedSwitcher cross-fades the card *content* when a device
+    // flips between failed / connecting / connected, while the slot
+    // stays put.
     final dumbbellByDevice = {
-      for (final d in dumbbells) d.device: d,
+      for (final d in snapshot.connected) d.device: d,
     };
     final cards = <Widget>[
       for (final device in orderedDevices)

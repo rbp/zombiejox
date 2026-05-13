@@ -271,9 +271,11 @@ void main() {
     expect(find.byType(FailedDeviceCard), findsOneWidget);
     expect(find.text('Failed to connect'), findsOneWidget);
     expect(find.byIcon(Icons.refresh), findsOneWidget);
-    // The "ghost-card" approach: the device is no longer in the group but
-    // the user still sees a visual entry for it.
-    expect(group.dumbbells, isEmpty);
+    // The "ghost-card" approach: the device is no longer in
+    // `snapshot.connected` (it's in `snapshot.failed` instead), but the
+    // user still sees a visual entry for it.
+    expect(group.lastSnapshot.connected, isEmpty);
+    expect(group.lastSnapshot.failed, hasLength(1));
   });
 
   testWidgets(
@@ -308,7 +310,8 @@ void main() {
 
     // The failed card is gone; the device is back in the group.
     expect(find.byType(FailedDeviceCard), findsNothing);
-    expect(group.dumbbells, hasLength(1));
+    expect(group.lastSnapshot.connected, hasLength(1));
+    expect(group.lastSnapshot.failed, isEmpty);
     expect(fakes, hasLength(2)); // first attempt failed; second succeeded
   });
 
