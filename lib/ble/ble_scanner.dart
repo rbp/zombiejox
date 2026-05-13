@@ -15,9 +15,9 @@ class ScanHit {
 }
 
 /// Coarse adapter state — what HomeScreen renders against. We collapse
-/// the plugin's broader enum (`turningOn`/`turningOff`/`unknown` etc.)
-/// into "is the radio usable right now or not" because that's the only
-/// distinction the UI cares about.
+/// the plugin's broader enum (`turningOn`/`turningOff` etc.) into "is
+/// the radio usable right now or not, and if not, why" because that's
+/// the only distinction the UI cares about.
 enum BleAdapterState {
   /// Radio is on and the app may scan / connect.
   on,
@@ -26,9 +26,20 @@ enum BleAdapterState {
   /// surfaces a "Bluetooth is off" banner with an Open Settings button.
   off,
 
-  /// Hardware doesn't support BLE (or the plugin reports it unavailable).
-  /// Terminal — there's no recovery path the user can take. We still
-  /// render a banner so they understand why nothing works.
+  /// The OS reports the adapter is unauthorized — typically a
+  /// permission issue, not a hardware one. Distinct from [unsupported]
+  /// because the recovery path is "grant Bluetooth permission" via
+  /// app settings, not "buy different hardware". `HomeScreen`'s
+  /// permission-on-resume re-check will usually catch this same
+  /// scenario and route to `PermissionScreen` — but we keep a
+  /// dedicated banner state for the window where the adapter has
+  /// reported `unauthorized` and the permission check hasn't run yet.
+  unauthorized,
+
+  /// Hardware doesn't support BLE (or the plugin reports it
+  /// unavailable). Terminal — there's no recovery path the user can
+  /// take. We still render a banner so they understand why nothing
+  /// works.
   unsupported,
 
   /// The OS hasn't told us yet. Treated like `off` for UI gating but
@@ -121,8 +132,9 @@ class FlutterBluePlusScanner implements BleScanner {
       case BluetoothAdapterState.off:
       case BluetoothAdapterState.turningOff:
         return BleAdapterState.off;
-      case BluetoothAdapterState.unavailable:
       case BluetoothAdapterState.unauthorized:
+        return BleAdapterState.unauthorized;
+      case BluetoothAdapterState.unavailable:
         return BleAdapterState.unsupported;
       // `turningOn` and `unknown` round to `unknown` — the platform is
       // mid-flip or hasn't reported, so we show the muted "checking"

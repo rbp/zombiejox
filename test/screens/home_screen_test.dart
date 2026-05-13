@@ -570,13 +570,36 @@ void main() {
 
     testWidgets(
         'adapter state: unsupported → distinct banner copy (terminal '
-        'platform state, not a "turn it on" prompt)', (tester) async {
+        'platform state, not a "turn it on" prompt). Open Settings '
+        'button is suppressed (nothing in Settings will surface a '
+        'missing BLE radio).', (tester) async {
       final prefs = await _freshPrefs();
       final ctx = await _pumpHome(tester, prefs: prefs);
       ctx.scanner.emitAdapterState(BleAdapterState.unsupported);
       await tester.pumpAndSettle();
 
       expect(find.textContaining('Bluetooth Low Energy is not available'),
+          findsOneWidget);
+      expect(find.text('Open Settings'), findsNothing);
+      // Scan-area copy is tailored too — NOT "turn it on".
+      expect(find.text('Scanning is unavailable on this device.'),
+          findsOneWidget);
+      expect(find.text('Turn Bluetooth on to scan.'), findsNothing);
+    });
+
+    testWidgets(
+        'adapter state: unauthorized → distinct "permission denied" '
+        'banner (not the "off" or "unsupported" wording)',
+        (tester) async {
+      final prefs = await _freshPrefs();
+      final ctx = await _pumpHome(tester, prefs: prefs);
+      ctx.scanner.emitAdapterState(BleAdapterState.unauthorized);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Bluetooth permission was denied'),
+          findsOneWidget);
+      expect(find.text('Open Settings'), findsOneWidget);
+      expect(find.text('Grant Bluetooth permission to scan.'),
           findsOneWidget);
     });
 

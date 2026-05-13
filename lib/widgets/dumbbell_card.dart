@@ -76,7 +76,15 @@ class _Card extends StatelessWidget {
     final battery = state?.batteryPct;
     final motorActive = state?.motorActive ?? false;
     final connected = connState == BleConnectionState.connected;
-    final disconnected = connState == BleConnectionState.disconnected;
+    // Gate the mid-session-drop UI on `state != null` — the underlying
+    // BLE stream emits an initial `disconnected` value at subscription
+    // time, before connect() has had a chance to resolve. Without this
+    // guard a brand-new card would flash an error-coloured "Disconnected"
+    // for one frame before settling into "Connecting…". `state != null`
+    // is "the device has at some point reported a state frame", i.e.
+    // "was once truly connected".
+    final disconnected = connState == BleConnectionState.disconnected &&
+        state != null;
     final weight = state == null ? '—' : formatWeight(state!.weightIndex, unit);
 
     // Three-way status: a clean `disconnected` event after the device

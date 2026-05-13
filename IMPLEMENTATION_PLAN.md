@@ -156,7 +156,7 @@ android/app/src/main/AndroidManifest.xml   ✅
 ios/Runner/Info.plist                       ✅
 ```
 
-Total test count: **152 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
+Total test count: **154 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
 
 ### 1e. Platform setup — ✅ done
 
@@ -356,7 +356,7 @@ Pulling down from the main screen refreshes: re-fetches the weights of connected
 
 - ✅ **Protocol correctness** — `0xD6 <idx>` sent from nRF Connect physically moves the dumbbell across all 8 indices on `DB200-0161997`.
 - ✅ **Protocol unit tests** — `test/protocol/checksum_test.dart` and `test/protocol/frame_test.dart` exercise the checksum algorithm and the frame builder/parser round-trip.
-- ✅ **State + group + widget + screen unit tests** — 152 tests total covering `state/{weights,preferences,unit_auto_matcher,permission_request_flow}`, `devices/{dumbbell,weight_group}` (incl. `GroupSnapshot` derivations + `remove()` race guard), `widgets/{weight_button,dumbbell_card,failed_device_card}` (incl. `TextScaler` 1.6× large-font safety + the optional `onRemove` affordance + the mid-session-drop "Disconnected" state), `screens/{home,permission,settings,about}_screen` (warm-start seeding, promote-on-tap, retry, ×-remove, auto-match-from-dock, unit-toggle live re-label, consensus / motor-active, persisted-set, BT-adapter-off banner, permission-revoked-on-resume re-route, scan-empty hint + Scan again). Includes the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
+- ✅ **State + group + widget + screen unit tests** — 154 tests total covering `state/{weights,preferences,unit_auto_matcher,permission_request_flow}`, `devices/{dumbbell,weight_group}` (incl. `GroupSnapshot` derivations + `remove()` race guard), `widgets/{weight_button,dumbbell_card,failed_device_card}` (incl. `TextScaler` 1.6× large-font safety + the optional `onRemove` affordance + the mid-session-drop "Disconnected" state), `screens/{home,permission,settings,about}_screen` (warm-start seeding, promote-on-tap, retry, ×-remove, auto-match-from-dock, unit-toggle live re-label, consensus / motor-active, persisted-set, BT-adapter-off banner, permission-revoked-on-resume re-route, scan-empty hint + Scan again). Includes the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
 - ✅ **Multi-device fan-out (architectural)** — `WeightGroup.setWeightIndex` fan-out covered by unit tests against a fake-Dumbbell.
 
 ### Pending — needs on-device verification (Android + iOS)
@@ -382,7 +382,7 @@ The unit + widget test suites cover the pure-Dart and Flutter-widget layers, but
 - **Auto-match no-op after explicit pick**: open Settings, tap the lbs/kg toggle (either side counts as explicit). Reconnect with any unit combination → no SnackBar, no preference change.
 - **Auto-match across post-connect race**: the post-connect battery read makes a dumbbell `isReady` before the `0xD1` reply arrives. The auto-match should *not* fire on the bare battery-ready state — it should wait for the unit byte and then fire. Easiest probe: clear app data, connect; the SnackBar should arrive within ~1.5s of "Connecting…" disappearing on the cards, not instantly.
 - **Edge-case spot-checks** (§1h):
-  - Bluetooth turned off mid-session: the error-coloured "Bluetooth is off" banner appears at the top of the Home body, the scan area copy switches to "Turn Bluetooth on to scan.", the Open Settings button takes you to the OS Bluetooth settings. Toggle BT back on → banner + copy disappear, scan resumes.
+  - Bluetooth turned off mid-session: the error-coloured "Bluetooth is off" banner appears at the top of the Home body, the scan area copy switches to "Turn Bluetooth on to scan.", the Open Settings button takes you to the app's system settings page (where BT-related permissions live; from there or via the OS quick-settings panel you toggle Bluetooth back on). Toggle BT back on → banner + copy disappear, scan resumes.
   - All dumbbells out of range: after the 30 s scan timeout the bottom region shows "No JaxJox dumbbells found. Make sure they're powered on and in range." with a tonal Scan again button. Tap → scan restarts.
   - Mid-session drop: power off a connected dumbbell — its card flips to an error-coloured "Disconnected" chip + body line (not "Connecting…"). Power it back on — it does not auto-reconnect yet (that's §2a); the user needs to ×-remove it and re-add it from the scan list.
   - Permission revocation (Android): with HomeScreen visible, background the app, revoke "Nearby devices" in Settings.app, foreground it → HomeScreen pushes back to PermissionScreen automatically.

@@ -168,6 +168,26 @@ void main() {
   });
 
   testWidgets(
+      'initial "disconnected" event before connect resolves → still '
+      'reads as "Connecting…", NOT the error-coloured "Disconnected" '
+      '(regression — Copilot review on PR #22)', (tester) async {
+    // BluetoothDevice.connectionState emits an initial `disconnected`
+    // value at subscription time. Without the `state != null` gate,
+    // newly-added cards would flash an error-coloured "Disconnected"
+    // for one frame before settling.
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+
+    await _pump(tester, DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs));
+    fake.emitDisconnected();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Disconnected'), findsNothing,
+        reason: 'no state frame yet ⇒ still in initial-connecting phase');
+    expect(find.text('Connecting…'), findsOneWidget);
+  });
+
+  testWidgets(
       'connection drop after a successful connect → "Disconnected" '
       'chip + body line (not the muted "Connecting…" fallback)',
       (tester) async {

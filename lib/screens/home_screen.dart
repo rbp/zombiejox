@@ -129,10 +129,18 @@ class _HomeScreenState extends State<HomeScreen>
         _defaultCheckPermissionsGranted)();
     if (!mounted) return;
     if (granted) return;
-    Navigator.of(context).pushReplacement(
+    // `pushAndRemoveUntil` (not `pushReplacement`): the user may have a
+    // Settings or About route pushed on top of Home when permissions
+    // get revoked. pushReplacement would replace whatever's on top —
+    // leaving a duplicated HomeScreen underneath and double state
+    // when PermissionScreen later re-pushes Home. Clear the stack
+    // entirely so the rationale screen is the only route, mirroring
+    // a fresh launch.
+    Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(
         builder: (_) => PermissionScreen(preferences: widget.preferences),
       ),
+      (route) => false,
     );
   }
 
@@ -710,11 +718,28 @@ class _ScanResults extends StatelessWidget {
         color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.6),
       );
       if (adapterState != BleAdapterState.on) {
-        // BT is off (or unknown); the banner above already tells the
-        // user what to do, so keep this short and consistent.
+        // BT isn't usable; the banner above already explains *why*.
+        // Tailor the scan-area copy so it matches the banner's
+        // wording — a single "Turn Bluetooth on" line would be wrong
+        // for unsupported (can't), unauthorized (permission, not
+        // power), or unknown (we don't know yet what's wrong).
+        final String hint;
+        switch (adapterState) {
+          case BleAdapterState.off:
+            hint = 'Turn Bluetooth on to scan.';
+          case BleAdapterState.unauthorized:
+            hint = 'Grant Bluetooth permission to scan.';
+          case BleAdapterState.unsupported:
+            hint = 'Scanning is unavailable on this device.';
+          case BleAdapterState.unknown:
+            hint = 'Waiting for Bluetooth…';
+          case BleAdapterState.on:
+            // Unreachable — the outer `if` excludes it.
+            hint = '';
+        }
         return Center(
           child: Text(
-            'Turn Bluetooth on to scan.',
+            hint,
             style: mutedStyle,
             textAlign: TextAlign.center,
           ),
@@ -795,6 +820,10 @@ class _BluetoothBanner extends StatelessWidget {
       case BleAdapterState.off:
         message = 'Bluetooth is off. Turn it on to scan and connect.';
         icon = Icons.bluetooth_disabled;
+      case BleAdapterState.unauthorized:
+        message = 'Bluetooth permission was denied. Open Settings to grant '
+            'it.';
+        icon = Icons.no_encryption_gmailerrorred;
       case BleAdapterState.unsupported:
         message = 'Bluetooth Low Energy is not available on this device.';
         icon = Icons.error_outline;
@@ -822,7 +851,14 @@ class _BluetoothBanner extends StatelessWidget {
                 style: TextStyle(color: scheme.onErrorContainer),
               ),
             ),
-            if (state != BleAdapterState.unknown) ...[
+            // Open Settings is a recovery affordance — only show it
+            // for states where Settings actually helps. `unsupported`
+            // is terminal hardware-level (nothing in Settings will
+            // surface a missing BLE radio); `unknown` is transient
+            // (don't push the user to fiddle with settings while the
+            // platform is still figuring it out).
+            if (state == BleAdapterState.off ||
+                state == BleAdapterState.unauthorized) ...[
               const SizedBox(width: 8),
               TextButton(
                 onPressed: () => unawaited(onOpenSettings()),
