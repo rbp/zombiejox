@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -108,11 +110,15 @@ class AboutScreen extends StatelessWidget {
                 label: 'github.com/rbp/zombiejox',
                 tooltip: 'Open the project on GitHub',
                 color: scheme.primary,
-                onTap: () => _open(context, _repoUri),
+                // `_open` is async; the VoidCallback expects void. Wrap
+                // in `unawaited` so the discarded Future is intentional
+                // (matches the HomeScreen pattern).
+                onTap: () => unawaited(_open(context, _repoUri)),
               ),
               _AuthorLine(
                 color: scheme.primary,
-                onTapEmail: () => _open(context, _authorEmailUri),
+                onTapEmail: () =>
+                    unawaited(_open(context, _authorEmailUri)),
               ),
               const SizedBox(height: 24),
               Text('Credits', style: theme.textTheme.titleMedium),
