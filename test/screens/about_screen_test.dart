@@ -10,10 +10,22 @@ void main() {
     TestWidgetsFlutterBinding.ensureInitialized();
   });
 
-  Future<void> pumpAbout(WidgetTester tester) async {
+  Future<List<Uri>> pumpAbout(
+    WidgetTester tester, {
+    bool launchResult = true,
+  }) async {
     await tester.binding.setSurfaceSize(const Size(800, 1800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(const MaterialApp(home: AboutScreen()));
+    final launched = <Uri>[];
+    await tester.pumpWidget(MaterialApp(
+      home: AboutScreen(
+        launchUri: (u) async {
+          launched.add(u);
+          return launchResult;
+        },
+      ),
+    ));
+    return launched;
   }
 
   testWidgets('renders the project name, credits, license, and disclaimer',
@@ -38,5 +50,56 @@ void main() {
       (tester) async {
     await pumpAbout(tester);
     expect(find.textContaining('docs/ble_protocol.md'), findsOneWidget);
+  });
+
+  testWidgets('renders the logo at the top + the GitHub + author links',
+      (tester) async {
+    await pumpAbout(tester);
+
+    expect(find.byType(Image), findsOneWidget,
+        reason: 'logo above the app name');
+    expect(find.textContaining('github.com/rbp/zombiejox'), findsOneWidget);
+    expect(find.textContaining('Created by Rodrigo Pimentel'), findsOneWidget);
+    expect(find.text('rbp@isnomore.net'), findsOneWidget);
+  });
+
+  testWidgets('tapping the GitHub row launches the repo URL', (tester) async {
+    final launched = await pumpAbout(tester);
+
+    await tester.tap(find.textContaining('github.com/rbp/zombiejox'));
+    await tester.pump();
+
+    expect(launched, hasLength(1));
+    expect(launched.single.toString(), 'https://github.com/rbp/zombiejox');
+  });
+
+  testWidgets('tapping the email — and ONLY the email — launches mailto:',
+      (tester) async {
+    final launched = await pumpAbout(tester);
+
+    // The email span is the only tappable element on the author line:
+    // the leading icon and the surrounding "Rodrigo Pimentel <…> started
+    // this project." text are inert.
+    await tester.tap(find.text('rbp@isnomore.net'));
+    await tester.pump();
+    expect(launched, hasLength(1));
+    expect(launched.single.scheme, 'mailto');
+    expect(launched.single.path, 'rbp@isnomore.net');
+
+    // Tap the leading person icon — must not launch anything.
+    await tester.tap(find.byIcon(Icons.person_outline));
+    await tester.pump();
+    expect(launched, hasLength(1),
+        reason: 'icon is not wrapped in an InkWell — must not launch');
+  });
+
+  testWidgets('a failing launch surfaces a SnackBar (not an uncaught error)',
+      (tester) async {
+    await pumpAbout(tester, launchResult: false);
+    await tester.tap(find.textContaining('github.com/rbp/zombiejox'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(SnackBar), findsOneWidget);
+    expect(find.textContaining('Could not open'), findsOneWidget);
   });
 }

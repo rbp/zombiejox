@@ -13,6 +13,7 @@ dependencies:
   flutter_blue_plus: ^2.3.1
   permission_handler: ^12.0.1
   shared_preferences: ^2.3.0
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:
@@ -23,6 +24,12 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # Bundled assets the app reads at runtime. `flutter_launcher_icons` /
+  # `flutter_native_splash` consume `assets/*` directly from disk during
+  # their generators, so they don't need an entry here — but the About
+  # screen does (Image.asset reads the Flutter asset bundle).
+  assets:
+    - assets/icon-1024.png
 
 # Re-run after editing:
 #   dart run flutter_launcher_icons
