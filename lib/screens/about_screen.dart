@@ -55,14 +55,28 @@ class AboutScreen extends StatelessWidget {
               // Logo above app name. The PNG is the cream-background app
               // icon — same image the launcher uses — clipped to a
               // rounded rectangle so it reads as an icon, not a banner.
+              //
+              // cacheWidth / cacheHeight: the source PNG is 1024×1024
+              // but it's displayed at 120 logical px. Without the
+              // hints, Flutter would decode the full 1024² into memory
+              // (~4 MB ARGB) and pay the CPU/GC cost on every About
+              // open. Decode to device-pixel-exact size instead.
               Center(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
-                  child: Image.asset(
-                    'assets/icon-1024.png',
-                    width: 120,
-                    height: 120,
-                  ),
+                child: Builder(
+                  builder: (context) {
+                    final dpr = MediaQuery.devicePixelRatioOf(context);
+                    final decoded = (120 * dpr).round();
+                    return ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: Image.asset(
+                        'assets/icon-1024.png',
+                        width: 120,
+                        height: 120,
+                        cacheWidth: decoded,
+                        cacheHeight: decoded,
+                      ),
+                    );
+                  },
                 ),
               ),
               const SizedBox(height: 16),

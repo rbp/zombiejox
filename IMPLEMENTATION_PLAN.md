@@ -155,7 +155,7 @@ android/app/src/main/AndroidManifest.xml   ✅
 ios/Runner/Info.plist                       ✅
 ```
 
-Total test count: **142 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
+Total test count: **146 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
 
 ### 1e. Platform setup — ✅ done
 
@@ -244,7 +244,7 @@ Test seam: `AboutScreen.launchUri` accepts a `Future<bool> Function(Uri)` overri
 Original notes (kept for reference):
 
 - It should have the logo at the top. Either the app name and below it, the logo; or the other way round.
-- Below "what it is", a link back to the app's Github page
+- Below "what it is", a link back to the app's GitHub page
 - Then, "Rodrigo Pimentel <rbp@isnomore.net> started this project"
 - Then, the rest of the README contents, which is what the About screen currently shows.
 
@@ -261,7 +261,7 @@ Original notes (kept for reference):
 
 It should feel modern and smooth. Not too minimalist that it feels cold, but definitely not frilly. It should definitely feel designed, not something that a backend developer would make (i.e., not simple text elements on a white background).
 
-Each dumbbell card should look like a button that's either selected or not (instead of looking like an unstyled html checkbox like on the scan screen). The weight selection buttons should all have the same dimensions, and should be rectangular with slightly rouded corners.
+Each dumbbell card should look like a button that's either selected or not (instead of looking like an unstyled html checkbox like on the scan screen). The weight selection buttons should all have the same dimensions, and should be rectangular with slightly rounded corners.
 
 The iOS app https://apps.apple.com/nl/app/jaxjox-connect/id6759603427 is good inspiration. We don't make to make a clone of it, but it has decent design.
 
@@ -296,7 +296,7 @@ The app should work:
 
 The small "stop" / "retry" button on top-right of the scan screen is confusing - especially the "stop" button, which is simply a filled square that looks like an asset is missing. It should have a circle around it, like https://fontawesome.com/icons/duotone/solid/circle-stop
 
-### 2e. Allow user to change the diaplay name of dumbbells
+### 2e. Allow user to change the display name of dumbbells
 
 Currently, the name displayed is the device's uid, and is what shows up across the Home screen (top region cards and the bottom scan list). A simple approach is: when the user taps on the portion of the dumbbell card containing the display name (currently, the UUID), a pop-up with a single input field is displayed, prompting the user to rename the dumbbells. If the user then taps "ok", we store and always use that name for that dumbbell. If they tap "cancel", nothing is changed.
 
@@ -352,7 +352,7 @@ i.e., asymmetric setting, gated behind a Settings toggle
 
 - ✅ **Protocol correctness** — `0xD6 <idx>` sent from nRF Connect physically moves the dumbbell across all 8 indices on `DB200-0161997`.
 - ✅ **Protocol unit tests** — `test/protocol/checksum_test.dart` and `test/protocol/frame_test.dart` exercise the checksum algorithm and the frame builder/parser round-trip.
-- ✅ **State + group + widget + screen unit tests** — 142 tests total covering `state/{weights,preferences,unit_auto_matcher,permission_request_flow}`, `devices/{dumbbell,weight_group}` (incl. `GroupSnapshot` derivations + `remove()` race guard), `widgets/{weight_button,dumbbell_card,failed_device_card}` (incl. `TextScaler` 1.6× large-font safety + the optional `onRemove` affordance), `screens/{home,permission,settings,about}_screen` (warm-start seeding, promote-on-tap, retry, ×-remove, auto-match-from-dock, unit-toggle live re-label, consensus / motor-active, persisted-set). Includes the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
+- ✅ **State + group + widget + screen unit tests** — 146 tests total covering `state/{weights,preferences,unit_auto_matcher,permission_request_flow}`, `devices/{dumbbell,weight_group}` (incl. `GroupSnapshot` derivations + `remove()` race guard), `widgets/{weight_button,dumbbell_card,failed_device_card}` (incl. `TextScaler` 1.6× large-font safety + the optional `onRemove` affordance), `screens/{home,permission,settings,about}_screen` (warm-start seeding, promote-on-tap, retry, ×-remove, auto-match-from-dock, unit-toggle live re-label, consensus / motor-active, persisted-set). Includes the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
 - ✅ **Multi-device fan-out (architectural)** — `WeightGroup.setWeightIndex` fan-out covered by unit tests against a fake-Dumbbell.
 
 ### Pending — needs on-device verification (Android + iOS)
