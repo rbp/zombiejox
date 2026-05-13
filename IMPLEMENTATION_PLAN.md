@@ -334,6 +334,10 @@ i.e., asymmetric setting, gated behind a Settings toggle
 
 Pulling down from the main screen refreshes: re-fetches the weights of connected dumbbells, and refreshes the list of availabe dumbbells.
 
+### 2h. Tapping the bluetooth status pill
+
+The bluetooth status pill may be truncated (e.g., "Conne..."). If the user taps that side of the dumbbell card, the app should display a message for a few seconds, saying "Device $UUID ($displayName) is $state" where ($displayName) is only shown if the user has set a specific name (see 2f), do not show the UUID again.
+
 
 ### ~~kg/lbs unit toggle on the dock~~ — confirmed impossible
 - No app-to-dock unit-write opcode exists (see §1i → *Confirmed impossible*). The user changes the dock's display unit via its own hidden physical gesture; the app reads the result via `0xD1` byte 8 and auto-matches its own display unit (already done in PR #10).
