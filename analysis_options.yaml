@@ -1,28 +1,53 @@
 # This file configures the analyzer, which statically analyzes Dart code to
 # check for errors, warnings, and lints.
 #
-# The issues identified by the analyzer are surfaced in the UI of Dart-enabled
-# IDEs (https://dart.dev/tools#ides-and-editors). The analyzer can also be
-# invoked from the command line by running `flutter analyze`.
+# Run from CI / pre-PR via `flutter analyze` (no flags). Failures must be
+# fixed, not silenced — `// ignore: …` is for genuinely unavoidable cases
+# only, with a comment explaining why.
 
-# The following line activates a set of recommended lints for Flutter apps,
-# packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  language:
+    # Strict mode makes the analyzer warn on dynamic invocations, raw types,
+    # and uninferred ones. This codebase is small enough that we want every
+    # boundary to be statically typed; if a third-party API forces dynamic,
+    # we wrap it.
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+
 linter:
-  # The lint rules applied to this project can be customized in the
-  # section below to disable rules from the `package:flutter_lints/flutter.yaml`
-  # included above or to enable additional rules. A list of all available lints
-  # and their documentation is published at https://dart.dev/lints.
-  #
-  # Instead of disabling a lint rule for the entire project in the
-  # section below, it can also be suppressed for a single line of code
-  # or a specific dart file by using the `// ignore: name_of_lint` and
-  # `// ignore_for_file: name_of_lint` syntax on the line or in the file
-  # producing the lint.
   rules:
-    # avoid_print: false  # Uncomment to disable the `avoid_print` rule
-    # prefer_single_quotes: true  # Uncomment to enable the `prefer_single_quotes` rule
+    # --- Async / Future hygiene ------------------------------------------
+    # `unawaited_futures` catches the `() => doSomethingAsync()` foot-gun
+    # where a Future returned from a VoidCallback slot silently goes
+    # nowhere. We always either await or wrap in `unawaited(...)` (see
+    # HomeScreen / AboutScreen for the established pattern).
+    unawaited_futures: true
+    # Stronger — flags any Future result that's been discarded, including
+    # synchronous calls inside async functions. Useful as a second pass.
+    discarded_futures: true
+
+    # --- BuildContext across async gaps ----------------------------------
+    # The classic "use BuildContext after await" mistake. We have several
+    # async navigation / SnackBar paths where this matters; let the
+    # analyzer do the bookkeeping.
+    use_build_context_synchronously: true
+
+    # --- Resource lifecycle ----------------------------------------------
+    # Streams and Sinks that get created but never cancelled / closed are
+    # the #1 source of memory leaks in long-running Flutter sessions. The
+    # analyzer can spot most of them.
+    cancel_subscriptions: true
+    close_sinks: true
+
+    # --- Readability / style ---------------------------------------------
+    # const-correctness — cheap but valuable; flutter_lints already
+    # enables `prefer_const_constructors` etc., but these two cover the
+    # corner cases.
+    prefer_const_declarations: true
+    prefer_final_in_for_each: true
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options

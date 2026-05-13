@@ -4,9 +4,6 @@ import 'package:flutter/material.dart';
 /// gyms / home gyms, and the screen is often glanced at, not read. A dark
 /// theme also gives the weight-grid tiles a higher-contrast container fill
 /// for the selected state.
-///
-/// Light theme is planned but not built — leaving [lightTheme] as a single
-/// future addition keeps the wiring stable.
 class AppTheme {
   /// Deep aubergine seed. Picked to feel "iron / equipment" rather than
   /// "consumer fitness app" — saturated enough to read as a brand colour,

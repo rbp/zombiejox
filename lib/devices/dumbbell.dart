@@ -49,9 +49,6 @@ class Dumbbell {
   /// notification — i.e. it's responsive on the protocol channel, not
   /// just connected at the BLE level. Use this to gate
   /// `setWeightIndex()` calls.
-  ///
-  /// Reads via the public [lastState] getter so subclasses (test fakes) that
-  /// override it are honoured.
   bool get isReady => !_disposed && lastState != null;
 
   Stream<BleConnectionState> get connectionState => _ble.connectionState;

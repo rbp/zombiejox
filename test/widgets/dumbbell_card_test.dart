@@ -57,7 +57,8 @@ void main() {
     final fake = _FakeDumbbell(_device('AA:01'));
     addTearDown(fake.dispose);
 
-    await _pump(tester, DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs));
+    await _pump(tester,
+        DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs, onRemove: () {}));
     await tester.pump();
 
     // Body line spells the state out with an ellipsis; the status chip
@@ -71,7 +72,8 @@ void main() {
     final fake = _FakeDumbbell(_device('AA:01'));
     addTearDown(fake.dispose);
 
-    await _pump(tester, DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs));
+    await _pump(tester,
+        DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs, onRemove: () {}));
     fake.emitConnected();
     fake.emitState(
       const DumbbellState(weightIndex: 2, motorActive: false, batteryPct: 88),
@@ -87,7 +89,8 @@ void main() {
     final fake = _FakeDumbbell(_device('AA:01'));
     addTearDown(fake.dispose);
 
-    await _pump(tester, DumbbellCard(dumbbell: fake, unit: WeightUnit.kg));
+    await _pump(tester,
+        DumbbellCard(dumbbell: fake, unit: WeightUnit.kg, onRemove: () {}));
     fake.emitConnected();
     fake.emitState(
       const DumbbellState(weightIndex: 4, motorActive: false, batteryPct: 50),
@@ -101,7 +104,8 @@ void main() {
     final fake = _FakeDumbbell(_device('AA:01'));
     addTearDown(fake.dispose);
 
-    await _pump(tester, DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs));
+    await _pump(tester,
+        DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs, onRemove: () {}));
     fake.emitConnected();
     fake.emitState(
       const DumbbellState(weightIndex: 2, motorActive: true, batteryPct: 100),
@@ -119,7 +123,8 @@ void main() {
     final fake = _FakeDumbbell(_device('AA:01'));
     addTearDown(fake.dispose);
 
-    await _pump(tester, DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs));
+    await _pump(tester,
+        DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs, onRemove: () {}));
     fake.emitConnected();
     await tester.pump();
 
@@ -131,23 +136,15 @@ void main() {
     final fake = _FakeDumbbell(_device('AA:BB:CC'));
     addTearDown(fake.dispose);
 
-    await _pump(tester, DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs));
+    await _pump(tester,
+        DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs, onRemove: () {}));
     await tester.pump();
 
     expect(find.text('AA:BB:CC'), findsOneWidget);
   });
 
-  testWidgets('onRemove absent → no × icon rendered', (tester) async {
-    final fake = _FakeDumbbell(_device('AA:01'));
-    addTearDown(fake.dispose);
-
-    await _pump(tester, DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs));
-    await tester.pump();
-    expect(find.byIcon(Icons.close), findsNothing);
-  });
-
   testWidgets(
-      'onRemove present → × icon renders and tap fires the callback',
+      'onRemove → × icon renders and tap fires the callback',
       (tester) async {
     var removes = 0;
     final fake = _FakeDumbbell(_device('AA:01'));
@@ -178,7 +175,8 @@ void main() {
     final fake = _FakeDumbbell(_device('AA:01'));
     addTearDown(fake.dispose);
 
-    await _pump(tester, DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs));
+    await _pump(tester,
+        DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs, onRemove: () {}));
     fake.emitDisconnected();
     await tester.pumpAndSettle();
 
@@ -194,7 +192,8 @@ void main() {
     final fake = _FakeDumbbell(_device('AA:01'));
     addTearDown(fake.dispose);
 
-    await _pump(tester, DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs));
+    await _pump(tester,
+        DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs, onRemove: () {}));
     fake.emitConnected();
     fake.emitState(
       const DumbbellState(weightIndex: 2, motorActive: false, batteryPct: 88),
