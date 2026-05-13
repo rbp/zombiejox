@@ -35,7 +35,6 @@ class DumbbellCard extends StatelessWidget {
     return StreamBuilder<BleConnectionState>(
       stream: dumbbell.connectionState,
       builder: (context, connSnap) {
-        final connected = connSnap.data == BleConnectionState.connected;
         return StreamBuilder<DumbbellState>(
           stream: dumbbell.states,
           initialData: dumbbell.lastState,
@@ -43,7 +42,7 @@ class DumbbellCard extends StatelessWidget {
             final state = stateSnap.data;
             return _Card(
               name: dumbbell.device.displayName,
-              connected: connected,
+              connState: connSnap.data,
               state: state,
               unit: unit,
               onRemove: onRemove,
@@ -57,14 +56,14 @@ class DumbbellCard extends StatelessWidget {
 
 class _Card extends StatelessWidget {
   final String name;
-  final bool connected;
+  final BleConnectionState? connState;
   final DumbbellState? state;
   final WeightUnit unit;
   final VoidCallback? onRemove;
 
   const _Card({
     required this.name,
-    required this.connected,
+    required this.connState,
     required this.state,
     required this.unit,
     required this.onRemove,
@@ -76,11 +75,29 @@ class _Card extends StatelessWidget {
     final scheme = theme.colorScheme;
     final battery = state?.batteryPct;
     final motorActive = state?.motorActive ?? false;
+    final connected = connState == BleConnectionState.connected;
+    // Gate the mid-session-drop UI on `state != null` — the underlying
+    // BLE stream emits an initial `disconnected` value at subscription
+    // time, before connect() has had a chance to resolve. Without this
+    // guard a brand-new card would flash an error-coloured "Disconnected"
+    // for one frame before settling into "Connecting…". `state != null`
+    // is "the device has at some point reported a state frame", i.e.
+    // "was once truly connected".
+    final disconnected = connState == BleConnectionState.disconnected &&
+        state != null;
     final weight = state == null ? '—' : formatWeight(state!.weightIndex, unit);
 
+    // Three-way status: a clean `disconnected` event after the device
+    // was once connected (drop mid-session) gets its own error-coloured
+    // label so the user doesn't misread it as "still connecting". The
+    // initial-connecting case (no state yet, no explicit `disconnected`)
+    // keeps the original tertiary-coloured "Connecting" treatment.
     final String statusLabel;
     final Color statusColor;
-    if (!connected) {
+    if (disconnected) {
+      statusLabel = 'Disconnected';
+      statusColor = scheme.error;
+    } else if (!connected) {
       statusLabel = 'Connecting';
       statusColor = scheme.tertiary;
     } else if (motorActive) {
@@ -91,9 +108,16 @@ class _Card extends StatelessWidget {
       statusColor = scheme.primary;
     }
 
-    final bodyText = connected
-        ? (motorActive ? 'Moving…' : 'Idle')
-        : 'Connecting…';
+    final String bodyText;
+    if (disconnected) {
+      bodyText = 'Disconnected';
+    } else if (!connected) {
+      bodyText = 'Connecting…';
+    } else if (motorActive) {
+      bodyText = 'Moving…';
+    } else {
+      bodyText = 'Idle';
+    }
 
     return Material(
       color: scheme.surfaceContainerHighest,
@@ -116,10 +140,12 @@ class _Card extends StatelessWidget {
                   Text(
                     bodyText,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: motorActive
-                          ? scheme.secondary
-                          : theme.textTheme.bodySmall?.color
-                              ?.withValues(alpha: 0.6),
+                      color: disconnected
+                          ? scheme.error
+                          : motorActive
+                              ? scheme.secondary
+                              : theme.textTheme.bodySmall?.color
+                                  ?.withValues(alpha: 0.6),
                     ),
                   ),
                 ],

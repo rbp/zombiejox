@@ -70,7 +70,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with WidgetsBindingObserver {
   late final BleScanner _scanner =
       widget.scanner ?? const FlutterBluePlusScanner();
   late final WeightGroup _group =
@@ -82,6 +83,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   StreamSubscription<GroupSnapshot>? _snapshotSub;
   GroupSnapshot _snapshot = GroupSnapshot.empty;
+  StreamSubscription<BleAdapterState>? _adapterSub;
+  BleAdapterState _adapter = BleAdapterState.unknown;
 
   /// The user's "selected" devices in tap order. Cards in the top region
   /// render in this order regardless of connection state — a retry that
@@ -97,9 +100,48 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _snapshot = _group.lastSnapshot;
     _snapshotSub = _group.snapshots.listen(_onSnapshot);
+    _adapterSub = _scanner.adapterState.listen((s) {
+      if (!mounted) return;
+      setState(() => _adapter = s);
+    });
     _ensurePermissionsAndBootstrap();
+  }
+
+  /// Re-check Bluetooth permissions whenever the app comes back to the
+  /// foreground — covers the Android "user toggled permission off in
+  /// Settings while the app was backgrounded" case. iOS doesn't expose
+  /// a way to revoke once granted, so this is effectively a no-op
+  /// there, but the cost is one async status read.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    // Don't re-check while the initial bootstrap check is still
+    // in-flight — it'll handle the same scenario and we'd double-push.
+    if (_checkingPermissions) return;
+    unawaited(_recheckPermissions());
+  }
+
+  Future<void> _recheckPermissions() async {
+    final granted = await (widget.checkPermissionsGranted ??
+        _defaultCheckPermissionsGranted)();
+    if (!mounted) return;
+    if (granted) return;
+    // `pushAndRemoveUntil` (not `pushReplacement`): the user may have a
+    // Settings or About route pushed on top of Home when permissions
+    // get revoked. pushReplacement would replace whatever's on top —
+    // leaving a duplicated HomeScreen underneath and double state
+    // when PermissionScreen later re-pushes Home. Clear the stack
+    // entirely so the rationale screen is the only route, mirroring
+    // a fresh launch.
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => PermissionScreen(preferences: widget.preferences),
+      ),
+      (route) => false,
+    );
   }
 
   /// Permissions should already be granted by the time the user lands
@@ -279,8 +321,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _autoMatcher.dispose();
     unawaited(_snapshotSub?.cancel() ?? Future<void>.value());
+    unawaited(_adapterSub?.cancel() ?? Future<void>.value());
     // Best-effort: a plugin-channel failure here would be a useless
     // crash since we're tearing down anyway.
     try {
@@ -327,12 +371,14 @@ class _HomeScreenState extends State<HomeScreen> {
               unit: unit,
               selectedDevices: _selectedDevices,
               scanner: _scanner,
+              adapterState: _adapter,
               scanFilter: _isJaxJox,
               onSelectIndex: _onSelectIndex,
               onRetry: _addOne,
               onRemove: _onRemove,
               onPromote: _onPromote,
               onToggleScan: _toggleScan,
+              onOpenAppSettings: openAppSettings,
             ),
           ),
         ),
@@ -358,24 +404,28 @@ class _Body extends StatelessWidget {
   final WeightUnit unit;
   final List<DeviceRef> selectedDevices;
   final BleScanner scanner;
+  final BleAdapterState adapterState;
   final bool Function(String name) scanFilter;
   final Future<void> Function(int) onSelectIndex;
   final Future<void> Function(DeviceRef) onRetry;
   final Future<void> Function(DeviceRef) onRemove;
   final void Function(DeviceRef) onPromote;
   final Future<void> Function(bool currentlyScanning) onToggleScan;
+  final Future<bool> Function() onOpenAppSettings;
 
   const _Body({
     required this.snapshot,
     required this.unit,
     required this.selectedDevices,
     required this.scanner,
+    required this.adapterState,
     required this.scanFilter,
     required this.onSelectIndex,
     required this.onRetry,
     required this.onRemove,
     required this.onPromote,
     required this.onToggleScan,
+    required this.onOpenAppSettings,
   });
 
   Widget _cardFor(
@@ -434,6 +484,17 @@ class _Body extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // BT-off banner is inline at the top of the body so it shifts
+          // the rest of the regions down instead of overlapping (a
+          // MaterialBanner via ScaffoldMessenger would float and cover
+          // cards). Auto-hides when the adapter comes back to `on`.
+          if (adapterState != BleAdapterState.on) ...[
+            _BluetoothBanner(
+              state: adapterState,
+              onOpenSettings: onOpenAppSettings,
+            ),
+            const SizedBox(height: 12),
+          ],
           // TOP — selected devices. Bounded share of the Column so 3+
           // cards scroll within the region instead of pushing the grid
           // / scan list off-screen. The flex share is the same as the
@@ -484,19 +545,29 @@ class _Body extends StatelessWidget {
           const SizedBox(height: 4),
           Expanded(
             flex: 2,
-            child: StreamBuilder<List<ScanHit>>(
-              stream: scanner.results,
-              initialData: const [],
-              builder: (context, snap) {
-                final selectedSet = selectedDevices.toSet();
-                final results = (snap.data ?? const <ScanHit>[])
-                    .where((r) =>
-                        scanFilter(r.device.name) &&
-                        !selectedSet.contains(r.device))
-                    .toList();
-                return _ScanResults(
-                  results: results,
-                  onPromote: onPromote,
+            child: StreamBuilder<bool>(
+              stream: scanner.isScanning,
+              initialData: scanner.isScanningNow,
+              builder: (context, scanningSnap) {
+                final scanning = scanningSnap.data == true;
+                return StreamBuilder<List<ScanHit>>(
+                  stream: scanner.results,
+                  initialData: const [],
+                  builder: (context, snap) {
+                    final selectedSet = selectedDevices.toSet();
+                    final results = (snap.data ?? const <ScanHit>[])
+                        .where((r) =>
+                            scanFilter(r.device.name) &&
+                            !selectedSet.contains(r.device))
+                        .toList();
+                    return _ScanResults(
+                      results: results,
+                      scanning: scanning,
+                      adapterState: adapterState,
+                      onPromote: onPromote,
+                      onScanAgain: () => onToggleScan(false),
+                    );
+                  },
                 );
               },
             ),
@@ -626,23 +697,93 @@ class ScanResultCard extends StatelessWidget {
 
 class _ScanResults extends StatelessWidget {
   final List<ScanHit> results;
+  final bool scanning;
+  final BleAdapterState adapterState;
   final void Function(DeviceRef) onPromote;
+  final VoidCallback onScanAgain;
 
   const _ScanResults({
     required this.results,
+    required this.scanning,
+    required this.adapterState,
     required this.onPromote,
+    required this.onScanAgain,
   });
 
   @override
   Widget build(BuildContext context) {
     if (results.isEmpty) {
       final theme = Theme.of(context);
-      return Center(
-        child: Text(
-          'Scanning for JaxJox devices…',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.6),
+      final mutedStyle = theme.textTheme.bodyMedium?.copyWith(
+        color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.6),
+      );
+      if (adapterState != BleAdapterState.on) {
+        // BT isn't usable; the banner above already explains *why*.
+        // Tailor the scan-area copy so it matches the banner's
+        // wording — a single "Turn Bluetooth on" line would be wrong
+        // for unsupported (can't), unauthorized (permission, not
+        // power), or unknown (we don't know yet what's wrong).
+        final String hint;
+        switch (adapterState) {
+          case BleAdapterState.off:
+            hint = 'Turn Bluetooth on to scan.';
+          case BleAdapterState.unauthorized:
+            hint = 'Grant Bluetooth permission to scan.';
+          case BleAdapterState.unsupported:
+            hint = 'Scanning is unavailable on this device.';
+          case BleAdapterState.unknown:
+            hint = 'Waiting for Bluetooth…';
+          case BleAdapterState.on:
+            // Unreachable — the outer `if` excludes it.
+            hint = '';
+        }
+        return Center(
+          child: Text(
+            hint,
+            style: mutedStyle,
+            textAlign: TextAlign.center,
           ),
+        );
+      }
+      if (scanning) {
+        return Center(
+          child: Text(
+            'Scanning for JaxJox devices…',
+            style: mutedStyle,
+            textAlign: TextAlign.center,
+          ),
+        );
+      }
+      // Scan finished with no hits — the dumbbells are probably out of
+      // range or powered off. Spell out what to check and offer a
+      // one-tap retry so the user doesn't have to find the toolbar
+      // refresh icon. Wrapped in a SingleChildScrollView so the empty
+      // state survives tight bottom-region heights (small phones in
+      // landscape, large-font scales) instead of triggering a flex
+      // overflow.
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'No JaxJox dumbbells found.',
+              style: theme.textTheme.titleSmall,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Make sure they\'re powered on and in range.',
+              style: mutedStyle,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            FilledButton.tonalIcon(
+              onPressed: onScanAgain,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Scan again'),
+            ),
+          ],
         ),
       );
     }
@@ -657,6 +798,79 @@ class _ScanResults extends StatelessWidget {
           onTap: () => onPromote(r.device),
         );
       },
+    );
+  }
+}
+
+/// "Bluetooth is off" inline banner. Wording adapts to the adapter
+/// state (off vs. unsupported vs. unknown); the Open Settings button
+/// is the only recovery path on iOS, and the cheapest one on Android.
+class _BluetoothBanner extends StatelessWidget {
+  final BleAdapterState state;
+  final Future<bool> Function() onOpenSettings;
+
+  const _BluetoothBanner({required this.state, required this.onOpenSettings});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final String message;
+    final IconData icon;
+    switch (state) {
+      case BleAdapterState.off:
+        message = 'Bluetooth is off. Turn it on to scan and connect.';
+        icon = Icons.bluetooth_disabled;
+      case BleAdapterState.unauthorized:
+        message = 'Bluetooth permission was denied. Open Settings to grant '
+            'it.';
+        icon = Icons.no_encryption_gmailerrorred;
+      case BleAdapterState.unsupported:
+        message = 'Bluetooth Low Energy is not available on this device.';
+        icon = Icons.error_outline;
+      case BleAdapterState.unknown:
+        message = 'Waiting for Bluetooth…';
+        icon = Icons.bluetooth_searching;
+      case BleAdapterState.on:
+        // Unreachable — caller checks `!= on` before rendering. Kept
+        // as a defensive case so a future enum addition doesn't break
+        // the switch.
+        return const SizedBox.shrink();
+    }
+    return Material(
+      color: scheme.errorContainer,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+        child: Row(
+          children: [
+            Icon(icon, color: scheme.onErrorContainer),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(color: scheme.onErrorContainer),
+              ),
+            ),
+            // Open Settings is a recovery affordance — only show it
+            // for states where Settings actually helps. `unsupported`
+            // is terminal hardware-level (nothing in Settings will
+            // surface a missing BLE radio); `unknown` is transient
+            // (don't push the user to fiddle with settings while the
+            // platform is still figuring it out).
+            if (state == BleAdapterState.off ||
+                state == BleAdapterState.unauthorized) ...[
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () => unawaited(onOpenSettings()),
+                style: TextButton.styleFrom(
+                  foregroundColor: scheme.onErrorContainer,
+                ),
+                child: const Text('Open Settings'),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

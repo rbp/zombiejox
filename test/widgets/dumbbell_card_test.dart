@@ -32,6 +32,7 @@ class _FakeDumbbell extends Dumbbell {
   DumbbellState? get lastState => _last;
 
   void emitConnected() => _conn.add(BleConnectionState.connected);
+  void emitDisconnected() => _conn.add(BleConnectionState.disconnected);
   void emitState(DumbbellState s) {
     _last = s;
     _states.add(s);
@@ -164,5 +165,54 @@ void main() {
     expect(find.byIcon(Icons.close), findsOneWidget);
     await tester.tap(find.byIcon(Icons.close));
     expect(removes, 1);
+  });
+
+  testWidgets(
+      'initial "disconnected" event before connect resolves → still '
+      'reads as "Connecting…", NOT the error-coloured "Disconnected" '
+      '(regression — Copilot review on PR #22)', (tester) async {
+    // BluetoothDevice.connectionState emits an initial `disconnected`
+    // value at subscription time. Without the `state != null` gate,
+    // newly-added cards would flash an error-coloured "Disconnected"
+    // for one frame before settling.
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+
+    await _pump(tester, DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs));
+    fake.emitDisconnected();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Disconnected'), findsNothing,
+        reason: 'no state frame yet ⇒ still in initial-connecting phase');
+    expect(find.text('Connecting…'), findsOneWidget);
+  });
+
+  testWidgets(
+      'connection drop after a successful connect → "Disconnected" '
+      'chip + body line (not the muted "Connecting…" fallback)',
+      (tester) async {
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+
+    await _pump(tester, DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs));
+    fake.emitConnected();
+    fake.emitState(
+      const DumbbellState(weightIndex: 2, motorActive: false, batteryPct: 88),
+    );
+    await tester.pump();
+    expect(find.text('Idle'), findsOneWidget);
+
+    // Mid-session drop: BleConnection emits `disconnected`. Pump
+    // twice — the broadcast stream delivers asynchronously on a
+    // microtask, then the StreamBuilder schedules a rebuild for the
+    // next frame.
+    fake.emitDisconnected();
+    await tester.pumpAndSettle();
+
+    // Body line spells "Disconnected"; the status chip mirrors it.
+    expect(find.text('Disconnected'), findsWidgets,
+        reason: 'must NOT fall back to the "Connecting…" wording');
+    expect(find.text('Idle'), findsNothing);
+    expect(find.text('Connecting…'), findsNothing);
   });
 }
