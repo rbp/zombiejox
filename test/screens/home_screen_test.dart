@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -148,6 +150,15 @@ class _FakeScanner implements BleScanner {
   Future<void> stopScan() async {
     _scanning = false;
     _isScanning.add(false);
+  }
+
+  int turnOnBluetoothCalls = 0;
+  bool turnOnBluetoothResult = true;
+
+  @override
+  Future<bool> turnOnBluetooth() async {
+    turnOnBluetoothCalls++;
+    return turnOnBluetoothResult;
   }
 
   void emit(List<ScanHit> hits) => _results.add(hits);
@@ -564,28 +575,68 @@ void main() {
     // A. BT adapter state — banner replaces the scan placeholder when
     // the radio isn't usable, surfaces an "Open Settings" button.
     testWidgets(
-        'adapter state: BT off → banner + "Turn Bluetooth on" hint in '
-        'the scan area', (tester) async {
-      final prefs = await _freshPrefs();
-      final ctx = await _pumpHome(tester, prefs: prefs);
+        'adapter state: BT off on Android → banner + "Enable Bluetooth" '
+        'CTA that triggers `scanner.turnOnBluetooth` (in-app system '
+        'prompt, no app-settings detour)', (tester) async {
+      // Pin the target platform so a future Flutter change to the
+      // widget-test default doesn't silently shift this test. Reset
+      // inside the test body (not via addTearDown): the framework's
+      // invariant check fires before tearDowns run.
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      try {
+        final prefs = await _freshPrefs();
+        final ctx = await _pumpHome(tester, prefs: prefs);
 
-      // Initial state: adapter is on, no banner.
-      expect(find.textContaining('Bluetooth is off'), findsNothing);
+        // Initial state: adapter is on, no banner.
+        expect(find.textContaining('Bluetooth is off'), findsNothing);
 
-      ctx.scanner.emitAdapterState(BleAdapterState.off);
-      await tester.pumpAndSettle();
+        ctx.scanner.emitAdapterState(BleAdapterState.off);
+        await tester.pumpAndSettle();
 
-      expect(find.textContaining('Bluetooth is off'), findsOneWidget);
-      expect(find.text('Open Settings'), findsOneWidget,
-          reason: 'banner exposes a one-tap recovery affordance');
-      expect(find.text('Turn Bluetooth on to scan.'), findsOneWidget,
-          reason: 'scan-area copy is consistent with the banner');
+        expect(find.textContaining('Bluetooth is off'), findsOneWidget);
+        expect(find.text('Enable Bluetooth'), findsOneWidget,
+            reason: 'Android off-state CTA pops the in-app enable prompt');
+        expect(find.text('Open Settings'), findsNothing,
+            reason: 'off-state must NOT route to app settings');
+        expect(find.text('Turn Bluetooth on to scan.'), findsOneWidget,
+            reason: 'scan-area copy is consistent with the banner');
 
-      // Bringing BT back on hides both the banner and the "off" copy.
-      ctx.scanner.emitAdapterState(BleAdapterState.on);
-      await tester.pumpAndSettle();
-      expect(find.textContaining('Bluetooth is off'), findsNothing);
-      expect(find.text('Turn Bluetooth on to scan.'), findsNothing);
+        await tester.tap(find.text('Enable Bluetooth'));
+        await tester.pumpAndSettle();
+        expect(ctx.scanner.turnOnBluetoothCalls, 1,
+            reason: 'CTA must call scanner.turnOnBluetooth');
+
+        // Bringing BT back on hides both the banner and the "off" copy.
+        ctx.scanner.emitAdapterState(BleAdapterState.on);
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Bluetooth is off'), findsNothing);
+        expect(find.text('Turn Bluetooth on to scan.'), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    testWidgets(
+        'adapter state: BT off on iOS → banner shows instructional text '
+        '(no programmatic CTA — iOS doesn\'t expose a toggle)', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        final prefs = await _freshPrefs();
+        final ctx = await _pumpHome(tester, prefs: prefs);
+        ctx.scanner.emitAdapterState(BleAdapterState.off);
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('Bluetooth is off'), findsOneWidget);
+        expect(find.text('Enable Bluetooth'), findsNothing,
+            reason: 'iOS has no programmatic BT toggle — hide the CTA');
+        expect(find.text('Open Settings'), findsNothing,
+            reason: 'app settings is for permission issues, not BT-off');
+        expect(
+            find.textContaining('Settings or Control Center'), findsOneWidget,
+            reason: 'iOS instructional copy points the user to the OS');
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     });
 
     testWidgets(

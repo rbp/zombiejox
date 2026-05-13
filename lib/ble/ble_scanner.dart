@@ -81,6 +81,16 @@ abstract class BleScanner {
 
   /// Best-effort stop. Safe to call when no scan is running.
   Future<void> stopScan();
+
+  /// Ask the platform to enable Bluetooth. On Android, this pops the
+  /// system "Allow Bluetooth?" dialog right in the app (via
+  /// `BluetoothAdapter.ACTION_REQUEST_ENABLE`) and resolves to `true`
+  /// once the user accepts, `false` on deny. **Android only**: iOS
+  /// doesn't expose a programmatic toggle (the user has to flip BT in
+  /// Settings or Control Center); the iOS implementation returns
+  /// `false` without prompting. UIs should hide the "Enable Bluetooth"
+  /// CTA on iOS and fall back to a text instruction.
+  Future<bool> turnOnBluetooth();
 }
 
 /// Production [BleScanner] backed by `flutter_blue_plus`'s static API.
@@ -124,6 +134,21 @@ class FlutterBluePlusScanner implements BleScanner {
 
   @override
   Future<void> stopScan() => FlutterBluePlus.stopScan();
+
+  @override
+  Future<bool> turnOnBluetooth() async {
+    // `FlutterBluePlus.turnOn()` returns `Future<void>` — it throws on
+    // user-rejection ("userRejected") or platform unsupported (iOS).
+    // Map both cases to `false` for the UI; success → true. Adapter
+    // state will flip to `on` independently via the adapterState stream
+    // so the banner hides itself as soon as the radio comes up.
+    try {
+      await FlutterBluePlus.turnOn();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 
   static BleAdapterState _mapAdapterState(BluetoothAdapterState s) {
     switch (s) {

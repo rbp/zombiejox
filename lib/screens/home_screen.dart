@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:permission_handler/permission_handler.dart';
@@ -394,6 +396,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onPromote: _onPromote,
               onToggleScan: _toggleScan,
               onOpenAppSettings: openAppSettings,
+              onEnableBluetooth: _scanner.turnOnBluetooth,
             ),
           ),
         ),
@@ -427,6 +430,7 @@ class _Body extends StatelessWidget {
   final void Function(DeviceRef) onPromote;
   final Future<void> Function(bool currentlyScanning) onToggleScan;
   final Future<bool> Function() onOpenAppSettings;
+  final Future<bool> Function() onEnableBluetooth;
 
   const _Body({
     required this.snapshot,
@@ -441,6 +445,7 @@ class _Body extends StatelessWidget {
     required this.onPromote,
     required this.onToggleScan,
     required this.onOpenAppSettings,
+    required this.onEnableBluetooth,
   });
 
   Widget _cardFor(
@@ -517,6 +522,7 @@ class _Body extends StatelessWidget {
             _BluetoothBanner(
               state: adapterState,
               onOpenSettings: onOpenAppSettings,
+              onEnableBluetooth: onEnableBluetooth,
             ),
             const SizedBox(height: 12),
           ],
@@ -825,23 +831,45 @@ class _ScanResults extends StatelessWidget {
   }
 }
 
-/// "Bluetooth is off" inline banner. Wording adapts to the adapter
-/// state (off vs. unsupported vs. unknown); the Open Settings button
-/// is the only recovery path on iOS, and the cheapest one on Android.
+/// "Bluetooth is off" inline banner. Wording + CTA adapts to the adapter
+/// state and platform:
+///   - `off` (Android): "Enable Bluetooth" button → in-app system
+///     prompt via `BluetoothAdapter.ACTION_REQUEST_ENABLE`. No settings
+///     detour, the user accepts and the radio is on.
+///   - `off` (iOS): no CTA — iOS doesn't expose a programmatic toggle.
+///     Wording instructs the user to flip BT in Control Center / Settings.
+///   - `unauthorized`: "Open Settings" → app's permission page.
+///   - `unsupported` / `unknown`: text only, no CTA (terminal or
+///     transient states where Settings doesn't help).
 class _BluetoothBanner extends StatelessWidget {
   final BleAdapterState state;
   final Future<bool> Function() onOpenSettings;
+  final Future<bool> Function() onEnableBluetooth;
 
-  const _BluetoothBanner({required this.state, required this.onOpenSettings});
+  const _BluetoothBanner({
+    required this.state,
+    required this.onOpenSettings,
+    required this.onEnableBluetooth,
+  });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // `defaultTargetPlatform` is web-safe (the `Platform` from `dart:io`
+    // throws on web), and stable across builds for a given target.
+    final isAndroid = defaultTargetPlatform == TargetPlatform.android;
     final String message;
     final IconData icon;
     switch (state) {
       case BleAdapterState.off:
-        message = 'Bluetooth is off. Turn it on to scan and connect.';
+        // On Android the CTA pops the in-app enable prompt; the message
+        // can be terse. On iOS we have to tell the user to do it
+        // themselves — there's no CTA we can wire to a programmatic
+        // toggle.
+        message = isAndroid
+            ? 'Bluetooth is off. Tap Enable Bluetooth to turn it on.'
+            : 'Bluetooth is off. Turn it on in Settings or Control '
+                'Center to scan and connect.';
         icon = Icons.bluetooth_disabled;
       case BleAdapterState.unauthorized:
         message = 'Bluetooth permission was denied. Open Settings to grant '
@@ -859,6 +887,22 @@ class _BluetoothBanner extends StatelessWidget {
         // the switch.
         return const SizedBox.shrink();
     }
+    // Pick the CTA based on state + platform. `off` on Android maps to
+    // the in-app enable prompt (the right thing); `off` on iOS shows
+    // no CTA (text-only instruction); `unauthorized` goes to app
+    // settings; `unsupported` / `unknown` show no CTA.
+    final String? ctaLabel;
+    final Future<bool> Function()? ctaAction;
+    if (state == BleAdapterState.off && isAndroid) {
+      ctaLabel = 'Enable Bluetooth';
+      ctaAction = onEnableBluetooth;
+    } else if (state == BleAdapterState.unauthorized) {
+      ctaLabel = 'Open Settings';
+      ctaAction = onOpenSettings;
+    } else {
+      ctaLabel = null;
+      ctaAction = null;
+    }
     return Material(
       color: scheme.errorContainer,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -874,21 +918,14 @@ class _BluetoothBanner extends StatelessWidget {
                 style: TextStyle(color: scheme.onErrorContainer),
               ),
             ),
-            // Open Settings is a recovery affordance — only show it
-            // for states where Settings actually helps. `unsupported`
-            // is terminal hardware-level (nothing in Settings will
-            // surface a missing BLE radio); `unknown` is transient
-            // (don't push the user to fiddle with settings while the
-            // platform is still figuring it out).
-            if (state == BleAdapterState.off ||
-                state == BleAdapterState.unauthorized) ...[
+            if (ctaLabel != null && ctaAction != null) ...[
               const SizedBox(width: 8),
               TextButton(
-                onPressed: () => unawaited(onOpenSettings()),
+                onPressed: () => unawaited(ctaAction!()),
                 style: TextButton.styleFrom(
                   foregroundColor: scheme.onErrorContainer,
                 ),
-                child: const Text('Open Settings'),
+                child: Text(ctaLabel),
               ),
             ],
           ],
