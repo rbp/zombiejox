@@ -1,7 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback, PlatformException;
 import 'package:permission_handler/permission_handler.dart';
@@ -75,10 +74,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  late final BleScanner _scanner =
-      widget.scanner ?? const FlutterBluePlusScanner();
-  late final WeightGroup _group =
-      widget.createWeightGroup?.call() ?? WeightGroup();
+  late final BleScanner _scanner = widget.scanner ?? const FlutterBluePlusScanner();
+  late final WeightGroup _group = widget.createWeightGroup?.call() ?? WeightGroup();
   late final UnitAutoMatcher _autoMatcher = UnitAutoMatcher(
     preferences: widget.preferences,
     onOutcome: _onAutoMatchOutcome,
@@ -165,8 +162,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _recheckPermissions() async {
     final bool granted;
     try {
-      granted = await (widget.checkPermissionsGranted ??
-          _defaultCheckPermissionsGranted)();
+      granted = await (widget.checkPermissionsGranted ?? _defaultCheckPermissionsGranted)();
     } on PlatformException catch (e, st) {
       // Narrow catch: a flaky platform channel on resume shouldn't
       // tear the screen down, but a Dart-side bug (e.g. a test
@@ -294,14 +290,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case AutoMatchOutcome.matched:
         final label = result.unit == WeightUnit.lbs ? 'lbs' : 'kg';
         messenger.showSnackBar(
-          SnackBar(
-              content: Text('Unit set to $label to match your dumbbells.')),
+          SnackBar(content: Text('Unit set to $label to match your dumbbells.')),
         );
       case AutoMatchOutcome.disagreement:
         messenger.showSnackBar(
           const SnackBar(
-            content: Text(
-                'Dumbbells are set to different units — pick one in Settings'),
+            content: Text('Dumbbells are set to different units — pick one in Settings'),
           ),
         );
     }
@@ -368,6 +362,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// §2g pull-to-refresh. Re-queries every ready dumbbell for its
+  /// current state and restarts the BLE scan in parallel. Resolves once
+  /// both kicks have returned — at which point the [RefreshIndicator]
+  /// stops spinning. Fresh state frames and new scan results continue
+  /// to arrive asynchronously through their normal streams.
+  Future<void> _onRefresh() async {
+    await Future.wait<void>([
+      _group.refresh(),
+      _startScan(),
+    ]);
+  }
+
   Future<void> _onSelectIndex(int idx) async {
     // §2b: haptic confirms the tap registered before the BLE write
     // round-trips. The grid's `canPress` already gates on `anyReady`,
@@ -419,8 +425,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             onPressed: () => unawaited(
               Navigator.of(context).push<void>(
                 MaterialPageRoute<void>(
-                  builder: (_) =>
-                      SettingsScreen(preferences: widget.preferences),
+                  builder: (_) => SettingsScreen(preferences: widget.preferences),
                 ),
               ),
             ),
@@ -448,6 +453,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onPromote: _onPromote,
               onRename: _onRename,
               onToggleScan: _toggleScan,
+              onRefresh: _onRefresh,
               onOpenAppSettings: openAppSettings,
               onEnableBluetooth: _scanner.turnOnBluetooth,
             ),
@@ -495,6 +501,11 @@ class _Body extends StatelessWidget {
   final void Function(DeviceRef device, String name) onRename;
 
   final Future<void> Function(bool currentlyScanning) onToggleScan;
+
+  /// §2g pull-to-refresh. Re-queries connected dumbbells AND restarts
+  /// the BLE scan. The [RefreshIndicator] spins until this resolves.
+  final Future<void> Function() onRefresh;
+
   final Future<bool> Function() onOpenAppSettings;
   final Future<bool> Function() onEnableBluetooth;
 
@@ -512,6 +523,7 @@ class _Body extends StatelessWidget {
     required this.onPromote,
     required this.onRename,
     required this.onToggleScan,
+    required this.onRefresh,
     required this.onOpenAppSettings,
     required this.onEnableBluetooth,
   });
@@ -576,8 +588,7 @@ class _Body extends StatelessWidget {
         AnimatedSwitcher(
           key: ValueKey('slot-${device.id}'),
           duration: const Duration(milliseconds: 250),
-          transitionBuilder: (child, anim) =>
-              FadeTransition(opacity: anim, child: child),
+          transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
           child: _cardFor(device, dumbbellByDevice),
         ),
     ];
@@ -605,15 +616,44 @@ class _Body extends StatelessWidget {
           // visual symmetry; on a tall phone two cards fit comfortably,
           // on a small phone (~140 dp top region) only one card fits
           // without scrolling — the ListView absorbs the rest.
+          //
+          // The region is wrapped in a RefreshIndicator so pulling
+          // down on the user's dumbbells fires `onRefresh` (re-query
+          // connected weights + restart scan). The inner scrollable uses
+          // `AlwaysScrollableScrollPhysics` so the gesture activates
+          // even when the content is short — and the empty hint is
+          // rendered through a `ListView` for the same reason.
+          // TODO:
+          // 1. Since only the top region is wrapped in the RefreshIndicator,
+          // pulling to refresh requires pulling from the very top of the screen.
+          // 2. The "refresh" icon feels too fast, even when pulling slowly. This might be
+          // a result of a small area being wrapped in RefreshIndicator.
           Expanded(
             flex: 2,
-            child: selectedDevices.isEmpty
-                ? const _TopEmptyHint()
-                : ListView.separated(
-                    itemCount: selectedCards.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (_, i) => selectedCards[i],
-                  ),
+            child: RefreshIndicator(
+              onRefresh: onRefresh,
+              child: selectedDevices.isEmpty
+                  // CustomScrollView + SliverFillRemaining so the empty
+                  // hint stays vertically centred in the region (matching
+                  // the pre-§2g layout) while still being scrollable —
+                  // RefreshIndicator's pull gesture needs a scrollable
+                  // child with `AlwaysScrollableScrollPhysics`.
+                  ? CustomScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      slivers: const [
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: _TopEmptyHint(),
+                        ),
+                      ],
+                    )
+                  : ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      itemCount: selectedCards.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (_, i) => selectedCards[i],
+                    ),
+            ),
           ),
           const SizedBox(height: 12),
           // MIDDLE — always-visible weight grid.
@@ -659,9 +699,7 @@ class _Body extends StatelessWidget {
                   builder: (context, snap) {
                     final selectedSet = selectedDevices.toSet();
                     final results = (snap.data ?? const <ScanHit>[])
-                        .where((r) =>
-                            scanFilter(r.device.name) &&
-                            !selectedSet.contains(r.device))
+                        .where((r) => scanFilter(r.device.name) && !selectedSet.contains(r.device))
                         .toList();
                     return _ScanResults(
                       results: results,
@@ -793,8 +831,7 @@ class ScanResultCard extends StatelessWidget {
                     Text(
                       'RSSI ${hit.rssi}',
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.textTheme.bodySmall?.color
-                            ?.withValues(alpha: 0.6),
+                        color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                       ),
                     ),
                   ],

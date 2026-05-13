@@ -161,6 +161,17 @@ class FakeDumbbell extends Dumbbell {
     if (failSetWeight) throw setWeightError;
   }
 
+  /// Counts every call to [refresh] — drives the §2g fan-out assertions
+  /// without having to fake the underlying TX write.
+  int refreshCallCount = 0;
+  bool failRefresh = false;
+
+  @override
+  Future<void> refresh() async {
+    refreshCallCount++;
+    if (failRefresh) throw StateError('fake refresh failure');
+  }
+
   @override
   Future<void> disconnect() async {
     disconnectCalled = true;
@@ -573,6 +584,110 @@ void main() {
       // The non-failing member should still have received the call.
       expect(fakes[0].setWeightCalls, [2]);
       expect(fakes[1].setWeightCalls, [2]);
+    });
+  });
+
+  group('refresh() — §2g pull-to-refresh', () {
+    test('fans out to every ready member in parallel', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      await group.add(_device('AA:02'));
+      await group.add(_device('AA:03'));
+
+      await group.refresh();
+
+      expect(fakes, hasLength(3));
+      for (final f in fakes) {
+        expect(f.refreshCallCount, 1);
+      }
+    });
+
+    test('on an empty group is a no-op (does not throw)', () async {
+      final group = WeightGroup(newDumbbell: (d) => FakeDumbbell(d));
+      await expectLater(group.refresh(), completes);
+    });
+
+    test('skips members that are not yet ready', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d, startsReady: false);
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+
+      await expectLater(group.refresh(), completes);
+      expect(fakes[0].refreshCallCount, 0,
+          reason: 'not-yet-ready members must be skipped');
+
+      fakes[0].becomeReady();
+      await group.refresh();
+      expect(fakes[0].refreshCallCount, 1);
+    });
+
+    test('with a mix of ready and not-ready members, only ready ones receive',
+        () async {
+      final fakes = <FakeDumbbell>[];
+      var i = 0;
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d, startsReady: i.isEven);
+        i++;
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01')); // ready
+      await group.add(_device('AA:02')); // NOT ready
+      await group.add(_device('AA:03')); // ready
+
+      await group.refresh();
+      expect(fakes[0].refreshCallCount, 1);
+      expect(fakes[1].refreshCallCount, 0);
+      expect(fakes[2].refreshCallCount, 1);
+    });
+
+    test(
+        'one member failing does NOT short-circuit the others '
+        '(eagerError: false)', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      await group.add(_device('AA:02'));
+      await group.add(_device('AA:03'));
+      fakes[1].failRefresh = true;
+
+      // Future.wait(eagerError: false) waits for every future and then
+      // throws the first error. We just care that all three writes
+      // were attempted — the error surfacing is incidental.
+      try {
+        await group.refresh();
+      } catch (_) {/* one peer threw, see comment above */}
+      expect(fakes[0].refreshCallCount, 1);
+      expect(fakes[1].refreshCallCount, 1);
+      expect(fakes[2].refreshCallCount, 1,
+          reason: 'a failing peer must not cancel a healthy refresh');
+    });
+
+    test('after disconnectAll: no-op', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      await group.disconnectAll();
+
+      await expectLater(group.refresh(), completes);
+      expect(fakes.single.refreshCallCount, 0);
     });
   });
 
