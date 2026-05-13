@@ -5,6 +5,7 @@ import '../devices/dumbbell.dart';
 import '../devices/weight_group.dart' show RetryState;
 import '../protocol/dumbbell_state.dart';
 import '../state/weights.dart';
+import 'rename_device_dialog.dart';
 
 /// Per-device status card. Subscribes to a single [Dumbbell]'s connection +
 /// state streams; renders name, status chip, current weight, motor state,
@@ -30,16 +31,33 @@ class DumbbellCard extends StatelessWidget {
   /// motor active, or — fallback — a drop with no supervisor).
   final RetryState? retryState;
 
+  /// User-chosen display name override (§2e). When null, the card
+  /// falls back to `dumbbell.device.displayName`. HomeScreen passes
+  /// the value resolved through [SelectionModel.displayNameFor] so a
+  /// renamed dumbbell shows the user's name on the card.
+  final String? displayName;
+
+  /// User tapped the name region to commit a rename. Receives the
+  /// raw input string (caller is responsible for trim / empty
+  /// handling — `SelectionModel.rename` already centralizes that). When
+  /// null, the name region is not tappable and no rename UI is
+  /// surfaced — keeps the widget reusable in screens or tests that
+  /// don't care about renaming.
+  final ValueChanged<String>? onRename;
+
   const DumbbellCard({
     super.key,
     required this.dumbbell,
     required this.unit,
     required this.onRemove,
     this.retryState,
+    this.displayName,
+    this.onRename,
   });
 
   @override
   Widget build(BuildContext context) {
+    final name = displayName ?? dumbbell.device.displayName;
     return StreamBuilder<BleConnectionState>(
       stream: dumbbell.connectionState,
       builder: (context, connSnap) {
@@ -49,12 +67,13 @@ class DumbbellCard extends StatelessWidget {
           builder: (context, stateSnap) {
             final state = stateSnap.data;
             return _Card(
-              name: dumbbell.device.displayName,
+              name: name,
               connState: connSnap.data,
               state: state,
               unit: unit,
               onRemove: onRemove,
               retryState: retryState,
+              onRename: onRename,
             );
           },
         );
@@ -70,6 +89,7 @@ class _Card extends StatelessWidget {
   final WeightUnit unit;
   final VoidCallback onRemove;
   final RetryState? retryState;
+  final ValueChanged<String>? onRename;
 
   const _Card({
     required this.name,
@@ -78,7 +98,17 @@ class _Card extends StatelessWidget {
     required this.unit,
     required this.onRemove,
     required this.retryState,
+    required this.onRename,
   });
+
+  Future<void> _handleRenameTap(BuildContext context) async {
+    final cb = onRename;
+    if (cb == null) return;
+    final result =
+        await showRenameDeviceDialog(context, initialName: name);
+    if (result == null) return;
+    cb(result);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -199,9 +229,23 @@ class _Card extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name,
+                  // Name is a tappable rename affordance (§2e). The
+                  // InkWell is always present so the widget tree stays
+                  // structurally identical across the rename / no-rename
+                  // case; when [onRename] is null, the tap is dead. An
+                  // InkWell with `onTap: null` is visually identical to
+                  // a plain Text — no ripple area is shown.
+                  InkWell(
+                    onTap: onRename == null
+                        ? null
+                        : () => _handleRenameTap(context),
+                    borderRadius: BorderRadius.circular(4),
+                    child: Text(
+                      name,
                       style: theme.textTheme.titleMedium,
-                      overflow: TextOverflow.ellipsis),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                   const SizedBox(height: 2),
                   AnimatedDefaultTextStyle(
                     duration: const Duration(milliseconds: 200),
