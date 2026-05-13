@@ -544,7 +544,14 @@ class WeightGroup {
         : _kBackoffSchedule.length - 1;
     final delay = _kBackoffSchedule[i];
     _retryTimers[db]?.cancel();
-    _retryTimers[db] = Timer(delay, () => _attemptReconnect(db));
+    _retryTimers[db] = Timer(delay, () {
+      // `unawaited` makes the future-discard explicit so the discard is
+      // not silent under a future tightening of the `discarded_futures`
+      // lint. `_attemptReconnect` already wraps its `db.reconnect()`
+      // call in try/catch and updates `_retryStates` on every outcome —
+      // there's no useful error to bubble out from here.
+      unawaited(_attemptReconnect(db));
+    });
   }
 
   /// Run one reconnect attempt against the dumbbell's transport. The
