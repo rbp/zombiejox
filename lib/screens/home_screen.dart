@@ -471,7 +471,13 @@ class _Body extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          // Divider visually separates "your current rig" (selected
+          // cards + weight grid) from "find more dumbbells" (scan
+          // results). M3 Divider uses `outlineVariant`, which is muted
+          // enough on the dark scheme not to compete with the cards.
+          // `height: 24` reserves the same total vertical space the old
+          // SizedBox(12) + line would have occupied.
+          const Divider(height: 24),
           // BOTTOM — scan results minus the top region, with a header
           // row that hosts the stop/refresh icon.
           _ScanHeader(scanner: scanner, onToggle: onToggleScan),
