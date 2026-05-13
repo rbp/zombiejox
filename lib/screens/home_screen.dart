@@ -104,7 +104,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _snapshotSub = _group.snapshots.listen(_onSnapshot);
     _adapterSub = _scanner.adapterState.listen((s) {
       if (!mounted) return;
+      final wasOff = _adapter != BleAdapterState.on;
       setState(() => _adapter = s);
+      // BT just came back on: members whose connections were torn down
+      // by the OS during the off window are sitting in the supervisor's
+      // backoff (failures during BT-off pushed each retry up to the
+      // 60 s cap). Fast-forward any waiting timers so the user doesn't
+      // wait out a backoff window after flipping BT back on.
+      // Distinct from the resume kick in `_recheckPermissions`: an app
+      // that stays foregrounded through a BT-off → BT-on flap never
+      // fires the lifecycle event.
+      if (wasOff && s == BleAdapterState.on) {
+        _group.kickReconnectsForResume();
+      }
     });
     // No initial permission check here — `main.dart` (or the route
     // pushing us) already verified that permissions are granted; the

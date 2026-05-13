@@ -133,6 +133,30 @@ void main() {
     expect(find.text('—'), findsOneWidget);
   });
 
+  testWidgets(
+      'BLE-connected but no state frame yet → body "Connecting…" '
+      '(not "Idle") — a half-responsive device with no `0xD1` reply '
+      'must not look ready', (tester) async {
+    // Regression for the on-device case where a depleted-battery dock
+    // briefly wakes its radio (BLE link succeeds) but the firmware
+    // never replies to `queryStatus`. Before the fix, the card showed
+    // "Idle" with a "—" weight — misleadingly close to a working state.
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+
+    await _pump(tester,
+        DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs, onRemove: () {}));
+    fake.emitConnected();
+    await tester.pump();
+
+    expect(find.text('Connecting…'), findsOneWidget,
+        reason: 'state == null ⇒ honestly show Connecting…');
+    expect(find.text('Connecting'), findsOneWidget,
+        reason: 'and the status chip');
+    expect(find.text('Idle'), findsNothing,
+        reason: 'must NOT claim Idle while no state frame has arrived');
+  });
+
   testWidgets('falls back to remoteId when advName is empty', (tester) async {
     // DeviceRef with empty name falls back to the id.
     final fake = _FakeDumbbell(_device('AA:BB:CC'));

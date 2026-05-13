@@ -772,6 +772,56 @@ void main() {
     });
 
     testWidgets(
+        'BleAdapterState transition off → on fast-forwards a waiting '
+        'reconnect (BT toggled off then on, app stays foregrounded)',
+        (tester) async {
+      // Without this, retries that climbed to the 60s cap while BT was
+      // off would keep the user on "Reconnecting…" for up to a minute
+      // after they flip BT back on. The lifecycle-resume kick doesn't
+      // help — the app never backgrounds.
+      final prefs = await _freshPrefs(remembered: ['AA:01']);
+      final scanner = _FakeScanner();
+      addTearDown(scanner.dispose);
+      final fakes = <_FakeDumbbell>[];
+
+      await tester.pumpWidget(MaterialApp(
+        home: HomeScreen(
+          preferences: prefs,
+          checkPermissionsGranted: () async => true,
+          scanner: scanner,
+          createWeightGroup: () => WeightGroup(newDumbbell: (d) {
+            final f = _FakeDumbbell(d)..failReconnect = true;
+            fakes.add(f);
+            return f;
+          }),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      fakes.single.emitState(
+        const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
+      );
+      await tester.pumpAndSettle();
+
+      // BT goes off: supervisor sees the drop, schedules the immediate
+      // first attempt (which fails because BT is off), then waits at 2s.
+      fakes.single.simulateDrop();
+      await tester.pumpAndSettle();
+      expect(fakes.single.reconnectCallCount, 1,
+          reason: 'immediate first attempt fired');
+
+      // The "BT is off" banner state.
+      scanner.emitAdapterState(BleAdapterState.off);
+      await tester.pumpAndSettle();
+
+      // BT comes back on → kick fires immediately, no 2s wait.
+      scanner.emitAdapterState(BleAdapterState.on);
+      await tester.pumpAndSettle();
+
+      expect(fakes.single.reconnectCallCount, 2,
+          reason: 'BT-on transition must fast-forward the waiting timer');
+    });
+
+    testWidgets(
         'AppLifecycleState.resumed with permissions revoked: routes to '
         'PermissionScreen AND does NOT call reconnect', (tester) async {
       final prefs = await _freshPrefs(remembered: ['AA:01']);

@@ -97,6 +97,16 @@ class _Card extends StatelessWidget {
     final disconnected =
         connState == BleConnectionState.disconnected && state != null;
     final reconnecting = retryState != null;
+    // "Connected at the BLE layer but no protocol-level state has
+    // arrived yet" reads the same as initial connecting from the user's
+    // perspective — `isReady` is false either way, and the weight grid
+    // stays disabled. Distinct from `disconnected` (which requires
+    // having been ready) and `reconnecting` (supervisor-driven).
+    // Without this, a half-responsive device (e.g. a depleted-battery
+    // dock that briefly wakes its radio but doesn't reply to `0xD1`)
+    // would render as "Idle" with an em-dash weight — misleading the
+    // user into thinking the connection works.
+    final connectingProto = !connected || state == null;
     final weight = state == null ? '—' : formatWeight(state!.weightIndex, unit);
 
     // Status priority:
@@ -107,7 +117,8 @@ class _Card extends StatelessWidget {
     //      shouldn't normally happen but kept as a defensive fallback
     //      so a future code path that bypasses [WeightGroup] doesn't
     //      lie to the user with "Reconnecting…" when nothing is.
-    //   3. Initial connecting (no state, not yet connected).
+    //   3. `connectingProto`: BLE link not yet up OR up but no state
+    //      frame yet (half-responsive device case).
     //   4. Motor active.
     //   5. Connected, idle.
     final String statusLabel;
@@ -118,7 +129,7 @@ class _Card extends StatelessWidget {
     } else if (disconnected) {
       statusLabel = 'Disconnected';
       statusColor = scheme.error;
-    } else if (!connected) {
+    } else if (connectingProto) {
       statusLabel = 'Connecting';
       statusColor = scheme.tertiary;
     } else if (motorActive) {
@@ -134,7 +145,7 @@ class _Card extends StatelessWidget {
       bodyText = 'Reconnecting…';
     } else if (disconnected) {
       bodyText = 'Disconnected';
-    } else if (!connected) {
+    } else if (connectingProto) {
       bodyText = 'Connecting…';
     } else if (motorActive) {
       bodyText = 'Moving…';
