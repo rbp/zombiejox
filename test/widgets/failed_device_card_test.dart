@@ -80,4 +80,46 @@ void main() {
     await tester.tap(find.byIcon(Icons.close));
     expect(removes, 1);
   });
+
+  testWidgets(
+      'displayName override (§2e) — when provided, replaces the raw '
+      'device id shown on the card', (tester) async {
+    await _pump(
+      tester,
+      FailedDeviceCard(
+        device: _device('AA:01'),
+        error: StateError('boom'),
+        onRetry: () {},
+        onRemove: () {},
+        displayName: 'My Left',
+      ),
+    );
+    expect(find.text('My Left'), findsOneWidget);
+    expect(find.text('AA:01'), findsNothing);
+  });
+
+  testWidgets(
+      'rename flow (§2e): tap the name → dialog → OK fires onRename '
+      'with the entered string', (tester) async {
+    final renames = <String>[];
+    await _pump(
+      tester,
+      FailedDeviceCard(
+        device: _device('AA:01'),
+        error: StateError('boom'),
+        onRetry: () {},
+        onRemove: () {},
+        displayName: 'AA:01',
+        onRename: renames.add,
+      ),
+    );
+    await tester.tap(find.text('AA:01'));
+    await tester.pumpAndSettle();
+    expect(find.text('Rename dumbbell'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'Right');
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(renames, ['Right']);
+  });
 }

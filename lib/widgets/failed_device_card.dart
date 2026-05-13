@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../ble/device_ref.dart';
+import 'rename_device_dialog.dart';
 
 /// Card shown for a [DeviceRef] whose `connect()` threw. Visually matches
 /// `DumbbellCard` but with an error-coloured "Failed" status chip, a
@@ -22,19 +23,41 @@ class FailedDeviceCard extends StatelessWidget {
   /// failed connect).
   final VoidCallback onRemove;
 
+  /// User-chosen display name override (§2e). When null, falls back
+  /// to `device.displayName`. Mirrors [DumbbellCard.displayName] so a
+  /// rename made on the connected card carries over if the device
+  /// fails to reconnect later.
+  final String? displayName;
+
+  /// User tapped the name region to commit a rename. See
+  /// [DumbbellCard.onRename] for semantics. When null, the name region
+  /// is not tappable.
+  final ValueChanged<String>? onRename;
+
   const FailedDeviceCard({
     super.key,
     required this.device,
     required this.error,
     required this.onRetry,
     required this.onRemove,
+    this.displayName,
+    this.onRename,
   });
+
+  Future<void> _handleRenameTap(BuildContext context, String name) async {
+    final cb = onRename;
+    if (cb == null) return;
+    final result = await showRenameDeviceDialog(context, initialName: name);
+    if (result == null) return;
+    cb(result);
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final errorColor = scheme.error;
+    final name = displayName ?? device.displayName;
     return Material(
       color: scheme.surfaceContainerHighest,
       shape: RoundedRectangleBorder(
@@ -51,9 +74,15 @@ class FailedDeviceCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    device.displayName,
-                    style: theme.textTheme.titleMedium,
+                  InkWell(
+                    onTap: onRename == null
+                        ? null
+                        : () => _handleRenameTap(context, name),
+                    borderRadius: BorderRadius.circular(4),
+                    child: Text(
+                      name,
+                      style: theme.textTheme.titleMedium,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -73,7 +102,7 @@ class FailedDeviceCard extends StatelessWidget {
             ),
             IconButton(
               icon: const Icon(Icons.close),
-              tooltip: 'Remove ${device.displayName}',
+              tooltip: 'Remove $name',
               visualDensity: VisualDensity.compact,
               onPressed: onRemove,
             ),

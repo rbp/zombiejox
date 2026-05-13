@@ -872,6 +872,65 @@ void main() {
     });
   });
 
+  group('rename (§2e)', () {
+    testWidgets(
+        'tap name on a connected card → dialog → OK persists the custom '
+        'name to Preferences AND the card re-renders with it',
+        (tester) async {
+      final prefs = await _freshPrefs(remembered: ['AA:01']);
+      final ctx = await _pumpHome(tester, prefs: prefs);
+      ctx.fakes.single.emitState(
+        const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
+      );
+      await tester.pumpAndSettle();
+
+      // Card shows the raw id (no advertised name on the remembered
+      // entry, no custom name yet).
+      expect(find.text('AA:01'), findsOneWidget);
+
+      await tester.tap(find.text('AA:01'));
+      await tester.pumpAndSettle();
+      expect(find.text('Rename dumbbell'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), 'Left');
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Left'), findsOneWidget,
+          reason: 'card re-renders with the new name');
+      expect(find.text('AA:01'), findsNothing,
+          reason: 'raw id is hidden once the custom name takes over');
+      expect(prefs.customDeviceNames, {'AA:01': 'Left'},
+          reason: 'rename persists immediately, independent of verified-set');
+    });
+
+    testWidgets(
+        'a scan-list device that was renamed in a prior session shows '
+        'the user\'s name (looked up via SelectionModel.displayNameFor)',
+        (tester) async {
+      // Fresh launch with no remembered devices, but with a saved
+      // custom name for AA:01 from an earlier session. The device
+      // appears in the scan list (with an advertised name that passes
+      // `isJaxJoxLiveDeviceName`) — should render as "Left", not the
+      // advertised name or the raw id.
+      SharedPreferences.setMockInitialValues({
+        'units': 'lbs',
+        'remembered_device_ids': const <String>[],
+        'custom_device_names': '{"AA:01":"Left"}',
+      });
+      final prefs = await Preferences.load();
+      final ctx = await _pumpHome(tester, prefs: prefs);
+
+      ctx.scanner.emit([_hit('AA:01', 'DB200-AA01')]);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Left'), findsOneWidget,
+          reason: 'scan list reflects the saved custom name');
+      expect(find.text('DB200-AA01'), findsNothing,
+          reason: 'advertised name is hidden by the user-chosen name');
+    });
+  });
+
   group('reconnect (§2a)', () {
     testWidgets(
         'mid-session drop on a ready dumbbell → card renders '

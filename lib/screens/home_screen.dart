@@ -12,6 +12,7 @@ import '../ble/uuids.dart';
 import '../devices/dumbbell.dart';
 import '../devices/weight_group.dart';
 import '../state/preferences.dart';
+import '../state/selection_model.dart';
 import '../state/unit_auto_matcher.dart';
 import '../state/weights.dart';
 import '../widgets/dumbbell_card.dart';
@@ -83,18 +84,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     onOutcome: _onAutoMatchOutcome,
   );
 
+  /// User-intent state (ADR-001 §4) — selected devices in tap order
+  /// plus per-device user-owned metadata (custom display names from
+  /// §2e; planned per-device weight override from §2f). The model
+  /// hydrates from [Preferences] on construction; we just subscribe
+  /// for change notifications and let it own the persistence path.
+  late final SelectionModel _selection =
+      SelectionModel(preferences: widget.preferences);
+
   StreamSubscription<GroupSnapshot>? _snapshotSub;
   GroupSnapshot _snapshot = GroupSnapshot.empty;
   StreamSubscription<BleAdapterState>? _adapterSub;
   BleAdapterState _adapter = BleAdapterState.unknown;
-
-  /// The user's "selected" devices in tap order. Cards in the top region
-  /// render in this order regardless of connection state — a retry that
-  /// briefly leaves [GroupSnapshot.failed] before reappearing in
-  /// [GroupSnapshot.connected] doesn't shuffle past its neighbours.
-  /// Seeded from [Preferences.rememberedDeviceIds] on warm start, then
-  /// grown by promote-on-tap and shrunk by per-card ×.
-  List<DeviceRef> _selectedDevices = const [];
 
   bool _onAnyConnectedFired = false;
 
@@ -102,6 +103,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _selection.addListener(_onSelectionChanged);
     _snapshot = _group.lastSnapshot;
     _snapshotSub = _group.snapshots.listen(_onSnapshot);
     _adapterSub = _scanner.adapterState.listen((s) {
@@ -131,18 +133,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   /// Warm-start seed + scan kick-off. Pulled out of [initState] so the
-  /// lifecycle is readable.
+  /// lifecycle is readable. The [SelectionModel] hydrated its entries
+  /// from [Preferences.rememberedDeviceIds] in its constructor, so all
+  /// we have to do here is kick off a connect for each one.
   void _bootstrap() {
-    final remembered = widget.preferences.rememberedDeviceIds;
-    if (remembered.isNotEmpty) {
-      setState(() {
-        _selectedDevices = [for (final id in remembered) DeviceRef(id: id)];
-      });
-      for (final id in remembered) {
-        unawaited(_addOne(DeviceRef(id: id)));
-      }
+    for (final device in _selection.devices) {
+      unawaited(_addOne(device));
     }
     unawaited(_startScan());
+  }
+
+  /// Rebuild when the selection (membership or custom names) changes.
+  /// The model is the source of truth for the top-region order and
+  /// the displayed names; reading off it on each build is cheap.
+  void _onSelectionChanged() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   /// Re-check Bluetooth permissions whenever the app comes back to the
@@ -256,40 +262,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// Fires the first time any member is ready and persists the current
-  /// `_selectedDevices` set as the warm-start anchor — so a Connect that
-  /// never reached `isReady` (every device out of range) doesn't poison
-  /// the next cold start.
+  /// Fires the first time any member is ready and flips
+  /// [SelectionModel.markVerified] so subsequent membership changes
+  /// (and the current set) flow through to
+  /// [Preferences.rememberedDeviceIds]. A Connect that never reaches
+  /// `isReady` (every device out of range) doesn't poison the next
+  /// cold start.
   void _maybeFireOnAnyConnected() {
     if (_onAnyConnectedFired) return;
     if (!_snapshot.anyReady) return;
     _onAnyConnectedFired = true;
-    _persistRememberedIfVerified();
-  }
-
-  /// Persist `_selectedDevices` to remembered-storage, but only after at
-  /// least one member has ever reached `isReady`. Called on first verified
-  /// connect, then on every subsequent change to the selected set
-  /// (promote-on-tap, ×-remove) — so the saved set always reflects what
-  /// the user actually has.
-  void _persistRememberedIfVerified() {
-    if (!_onAnyConnectedFired) return;
-    unawaited(
-      widget.preferences.setRememberedDeviceIds(
-        [for (final d in _selectedDevices) d.id],
-      ),
-    );
+    _selection.markVerified();
   }
 
   /// Feed the auto-matcher the current snapshot. `attemptedCount`
   /// reflects the user's intent for the active session — failed and
-  /// connecting devices both live in `_selectedDevices`.
+  /// connecting devices both live in the selection model.
   void _tickAutoMatcher() {
     _autoMatcher.tick((
       knownUnits: _snapshot.knownUnits,
       knownUnitCount: _snapshot.knownUnitCount,
       failedCount: _snapshot.failed.length,
-      attemptedCount: _selectedDevices.length,
+      attemptedCount: _selection.entries.length,
     ));
   }
 
@@ -326,26 +320,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /// User tapped a scan result. Promote the device to the top region
   /// (so the card appears immediately in `connecting` state) and kick
-  /// off the connect.
+  /// off the connect. The model's [SelectionModel.add] is a no-op for
+  /// an already-present device.
   void _onPromote(DeviceRef device) {
-    if (_selectedDevices.contains(device)) return;
-    setState(() => _selectedDevices = [..._selectedDevices, device]);
-    _persistRememberedIfVerified();
+    if (_selection.contains(device)) return;
+    _selection.add(device);
     unawaited(_addOne(device));
   }
 
-  /// User tapped × on a top card. Drop from `_selectedDevices` and
-  /// disconnect / clear the failure entry on the group. Symmetric with
-  /// [_onPromote]: short-circuit when the device isn't in the list so
-  /// a no-op tap doesn't rebuild the (immutable) list for nothing.
+  /// User tapped × on a top card. Drop from the selection and
+  /// disconnect / clear the failure entry on the group. [SelectionModel.remove]
+  /// is a silent no-op for an unknown device, so the explicit guard
+  /// here is just so we skip [WeightGroup.remove] too (which has its
+  /// own no-op behavior but the call is unnecessary).
   Future<void> _onRemove(DeviceRef device) async {
-    if (!_selectedDevices.contains(device)) return;
-    setState(() => _selectedDevices = [
-          for (final d in _selectedDevices)
-            if (d != device) d
-        ]);
-    _persistRememberedIfVerified();
+    if (!_selection.contains(device)) return;
+    _selection.remove(device);
     await _group.remove(device);
+  }
+
+  /// User committed a rename through the dialog on either card
+  /// variant. The raw string from the dialog is handed off to the
+  /// model, which trims and treats empty / whitespace-only as "clear
+  /// the custom name." (§2e)
+  void _onRename(DeviceRef device, String name) {
+    _selection.rename(device, name);
   }
 
   Future<void> _startScan() async {
@@ -392,6 +391,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _selection.removeListener(_onSelectionChanged);
+    _selection.dispose();
     _autoMatcher.dispose();
     unawaited(_snapshotSub?.cancel() ?? Future<void>.value());
     unawaited(_adapterSub?.cancel() ?? Future<void>.value());
@@ -436,7 +437,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             child: _Body(
               snapshot: _snapshot,
               unit: unit,
-              selectedDevices: _selectedDevices,
+              selectedDevices: _selection.devices,
+              displayNameFor: _selection.displayNameFor,
               scanner: _scanner,
               adapterState: _adapter,
               scanFilter: isJaxJoxLiveDeviceName,
@@ -444,6 +446,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onRetry: _addOne,
               onRemove: _onRemove,
               onPromote: _onPromote,
+              onRename: _onRename,
               onToggleScan: _toggleScan,
               onOpenAppSettings: openAppSettings,
               onEnableBluetooth: _scanner.turnOnBluetooth,
@@ -471,6 +474,13 @@ class _Body extends StatelessWidget {
   final GroupSnapshot snapshot;
   final WeightUnit unit;
   final List<DeviceRef> selectedDevices;
+
+  /// Resolves a device to its user-facing name (custom name if set,
+  /// else the advertised name or raw id). Threaded from
+  /// [SelectionModel.displayNameFor] so the top region AND the scan
+  /// list agree on the same name. (§2e)
+  final String Function(DeviceRef) displayNameFor;
+
   final BleScanner scanner;
   final BleAdapterState adapterState;
   final bool Function(String name) scanFilter;
@@ -478,6 +488,12 @@ class _Body extends StatelessWidget {
   final Future<void> Function(DeviceRef) onRetry;
   final Future<void> Function(DeviceRef) onRemove;
   final void Function(DeviceRef) onPromote;
+
+  /// User committed a rename for [device] via either card variant's
+  /// inline dialog. The raw string is forwarded as-is; the model
+  /// trims and treats empty / whitespace-only as "clear."
+  final void Function(DeviceRef device, String name) onRename;
+
   final Future<void> Function(bool currentlyScanning) onToggleScan;
   final Future<bool> Function() onOpenAppSettings;
   final Future<bool> Function() onEnableBluetooth;
@@ -486,6 +502,7 @@ class _Body extends StatelessWidget {
     required this.snapshot,
     required this.unit,
     required this.selectedDevices,
+    required this.displayNameFor,
     required this.scanner,
     required this.adapterState,
     required this.scanFilter,
@@ -493,6 +510,7 @@ class _Body extends StatelessWidget {
     required this.onRetry,
     required this.onRemove,
     required this.onPromote,
+    required this.onRename,
     required this.onToggleScan,
     required this.onOpenAppSettings,
     required this.onEnableBluetooth,
@@ -503,6 +521,7 @@ class _Body extends StatelessWidget {
     Map<DeviceRef, Dumbbell> dumbbellByDevice,
   ) {
     final dumbbell = dumbbellByDevice[device];
+    final name = displayNameFor(device);
     if (dumbbell != null) {
       return DumbbellCard(
         key: ValueKey('connected-${device.id}'),
@@ -510,6 +529,8 @@ class _Body extends StatelessWidget {
         unit: unit,
         onRemove: () => onRemove(device),
         retryState: snapshot.retryStates[device],
+        displayName: name,
+        onRename: (newName) => onRename(device, newName),
       );
     }
     final error = snapshot.failed[device];
@@ -520,6 +541,8 @@ class _Body extends StatelessWidget {
         error: error,
         onRetry: () => onRetry(device),
         onRemove: () => onRemove(device),
+        displayName: name,
+        onRename: (newName) => onRename(device, newName),
       );
     }
     // Slot is "pending" — the device is in `selectedDevices` but
@@ -646,6 +669,7 @@ class _Body extends StatelessWidget {
                       adapterState: adapterState,
                       onPromote: onPromote,
                       onScanAgain: () => onToggleScan(false),
+                      displayNameFor: displayNameFor,
                     );
                   },
                 );
@@ -730,12 +754,24 @@ class ScanResultCard extends StatelessWidget {
   final ScanHit hit;
   final VoidCallback onTap;
 
-  const ScanResultCard({super.key, required this.hit, required this.onTap});
+  /// User-facing name. When null, falls back to `hit.device.displayName`.
+  /// HomeScreen resolves this through [SelectionModel.displayNameFor] so
+  /// a previously-renamed dumbbell shows the user's name in the scan
+  /// list too — even before it's promoted into the selection. (§2e)
+  final String? displayName;
+
+  const ScanResultCard({
+    super.key,
+    required this.hit,
+    required this.onTap,
+    this.displayName,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final name = displayName ?? hit.device.displayName;
     return Material(
       color: scheme.surfaceContainerHighest,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -752,8 +788,7 @@ class ScanResultCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(hit.device.displayName,
-                        style: theme.textTheme.titleMedium),
+                    Text(name, style: theme.textTheme.titleMedium),
                     const SizedBox(height: 2),
                     Text(
                       'RSSI ${hit.rssi}',
@@ -780,6 +815,7 @@ class _ScanResults extends StatelessWidget {
   final BleAdapterState adapterState;
   final void Function(DeviceRef) onPromote;
   final VoidCallback onScanAgain;
+  final String Function(DeviceRef) displayNameFor;
 
   const _ScanResults({
     required this.results,
@@ -787,6 +823,7 @@ class _ScanResults extends StatelessWidget {
     required this.adapterState,
     required this.onPromote,
     required this.onScanAgain,
+    required this.displayNameFor,
   });
 
   @override
@@ -875,6 +912,7 @@ class _ScanResults extends StatelessWidget {
           key: ValueKey('scan-${r.device.id}'),
           hit: r,
           onTap: () => onPromote(r.device),
+          displayName: displayNameFor(r.device),
         );
       },
     );
