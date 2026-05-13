@@ -99,7 +99,7 @@ class UnitAutoMatcher {
       _timer?.cancel();
       // Don't await — fire-and-forget. Any prefs-write failure inside
       // _fire is swallowed there.
-      _fire();
+      unawaited(_fire());
       return;
     }
     // First arming only — subsequent state pushes don't reset the timer.

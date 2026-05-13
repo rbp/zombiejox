@@ -18,6 +18,7 @@ void main() {
         device: _device('AA:01'),
         error: StateError('boom'),
         onRetry: () {},
+        onRemove: () {},
       ),
     );
     // The device name (from advName, falling back to the remote id).
@@ -34,6 +35,7 @@ void main() {
         device: _device('AA:01'),
         error: StateError('boom'),
         onRetry: () => retries++,
+        onRemove: () {},
       ),
     );
     await tester.tap(find.byIcon(Icons.refresh));
@@ -48,11 +50,11 @@ void main() {
         device: _device('AA:01'),
         error: 'connection timed out',
         onRetry: () {},
+        onRemove: () {},
       ),
     );
-    // Match the refresh button specifically — when `onRemove` is null
-    // there's only one IconButton, but be explicit so the test keeps
-    // working when callers wire `onRemove`.
+    // Two IconButtons (refresh + close); scope the tooltip lookup to
+    // the refresh one explicitly.
     final btn = tester.widget<IconButton>(
       find.ancestor(
         of: find.byIcon(Icons.refresh),
@@ -62,19 +64,7 @@ void main() {
     expect(btn.tooltip, contains('connection timed out'));
   });
 
-  testWidgets('onRemove absent → no × icon rendered', (tester) async {
-    await _pump(
-      tester,
-      FailedDeviceCard(
-        device: _device('AA:01'),
-        error: StateError('boom'),
-        onRetry: () {},
-      ),
-    );
-    expect(find.byIcon(Icons.close), findsNothing);
-  });
-
-  testWidgets('onRemove present → × icon renders and tap fires the callback',
+  testWidgets('onRemove → × icon renders and tap fires the callback',
       (tester) async {
     var removes = 0;
     await _pump(

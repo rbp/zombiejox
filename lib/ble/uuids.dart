@@ -17,6 +17,17 @@ class JaxJoxUuids {
 /// asserts on the dumbbell's 0..7 range, etc.). Add a prefix here when a
 /// second product is actually wired up end-to-end. See
 /// `docs/ble_protocol.md` §2 for the full prefix catalogue.
-///
-/// Names ending in `U` are firmware-update mode; skip them.
 const List<String> kJaxJoxNamePrefixes = ['DB200'];
+
+/// True iff [advName] looks like a live JaxJox dumbbell — has one of
+/// [kJaxJoxNamePrefixes] AND isn't in DFU (firmware-update) mode.
+/// Centralised so the screen layer doesn't have to know about the
+/// DFU naming convention.
+///
+/// The original Android APK skips names ending in `U` for DFU
+/// (`DeviceManager.java`); we transcribe the same rule here.
+bool isJaxJoxLiveDeviceName(String advName) {
+  if (advName.isEmpty) return false;
+  if (advName.endsWith('U')) return false; // DFU mode
+  return kJaxJoxNamePrefixes.any(advName.startsWith);
+}

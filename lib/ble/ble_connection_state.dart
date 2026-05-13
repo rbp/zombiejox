@@ -1,9 +1,9 @@
 /// Plugin-agnostic connection state for a single BLE peripheral.
 ///
-/// The two states `flutter_blue_plus` actually emits on the platforms we
-/// support are `connected` and `disconnected`. `connecting` is the value
-/// `BleConnection.connectionState` reports for any *intermediate* state
-/// the plugin might surface in the future (e.g. a re-introduced
-/// `disconnecting`) — "neither live nor cleanly gone" rounds to
-/// "not-yet-live" for the UI, which only ever asks "is this connected?".
-enum BleConnectionState { connecting, connected, disconnected }
+/// `flutter_blue_plus` only ever emits `connected` / `disconnected` on
+/// the platforms we support — the plugin's deprecated `connecting`
+/// value never reaches our stream. The two-value enum gives consumers
+/// (today: `DumbbellCard`) a typed signal for "is this device live or
+/// not", distinct from the `null` that a `StreamBuilder` reports
+/// before any event has arrived.
+enum BleConnectionState { connected, disconnected }
