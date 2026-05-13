@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../ble/ble_connection_state.dart';
 import '../devices/dumbbell.dart';
+import '../devices/weight_group.dart' show RetryState;
 import '../protocol/dumbbell_state.dart';
 import '../state/weights.dart';
 
@@ -22,11 +23,19 @@ class DumbbellCard extends StatelessWidget {
   /// `WeightGroup` and from its own selected list.
   final VoidCallback onRemove;
 
+  /// Per-device reconnect state from the group snapshot, if the
+  /// transport has dropped and a retry is pending or in flight. Drives
+  /// the "Reconnecting…" status chip and body line; null means the
+  /// dumbbell is in its normal lifecycle (initial connect, connected,
+  /// motor active, or — fallback — a drop with no supervisor).
+  final RetryState? retryState;
+
   const DumbbellCard({
     super.key,
     required this.dumbbell,
     required this.unit,
     required this.onRemove,
+    this.retryState,
   });
 
   @override
@@ -45,6 +54,7 @@ class DumbbellCard extends StatelessWidget {
               state: state,
               unit: unit,
               onRemove: onRemove,
+              retryState: retryState,
             );
           },
         );
@@ -59,6 +69,7 @@ class _Card extends StatelessWidget {
   final DumbbellState? state;
   final WeightUnit unit;
   final VoidCallback onRemove;
+  final RetryState? retryState;
 
   const _Card({
     required this.name,
@@ -66,6 +77,7 @@ class _Card extends StatelessWidget {
     required this.state,
     required this.unit,
     required this.onRemove,
+    required this.retryState,
   });
 
   @override
@@ -82,21 +94,41 @@ class _Card extends StatelessWidget {
     // for one frame before settling into "Connecting…". `state != null`
     // is "the device has at some point reported a state frame", i.e.
     // "was once truly connected".
-    final disconnected = connState == BleConnectionState.disconnected &&
-        state != null;
+    final disconnected = connState == BleConnectionState.disconnected && state != null;
+    final reconnecting = retryState != null;
+    // "Connected at the BLE layer but no protocol-level state has
+    // arrived yet" reads the same as initial connecting from the user's
+    // perspective — `isReady` is false either way, and the weight grid
+    // stays disabled. Distinct from `disconnected` (which requires
+    // having been ready) and `reconnecting` (supervisor-driven).
+    // Without this, a half-responsive device (e.g. a depleted-battery
+    // dock that briefly wakes its radio but doesn't reply to `0xD1`)
+    // would render as "Idle" with an em-dash weight — misleading the
+    // user into thinking the connection works.
+    final connectingProto = !connected || state == null;
     final weight = state == null ? '—' : formatWeight(state!.weightIndex, unit);
 
-    // Three-way status: a clean `disconnected` event after the device
-    // was once connected (drop mid-session) gets its own error-coloured
-    // label so the user doesn't misread it as "still connecting". The
-    // initial-connecting case (no state yet, no explicit `disconnected`)
-    // keeps the original tertiary-coloured "Connecting" treatment.
+    // Status priority:
+    //   1. `reconnecting`: supervisor is mid-backoff or mid-attempt for
+    //      this device. Same tertiary colour as initial Connecting —
+    //      visually it IS a connect attempt, just preceded by a drop.
+    //   2. `disconnected` (no retry state): drop without supervisor,
+    //      shouldn't normally happen but kept as a defensive fallback
+    //      so a future code path that bypasses [WeightGroup] doesn't
+    //      lie to the user with "Reconnecting…" when nothing is.
+    //   3. `connectingProto`: BLE link not yet up OR up but no state
+    //      frame yet (half-responsive device case).
+    //   4. Motor active.
+    //   5. Connected, idle.
     final String statusLabel;
     final Color statusColor;
-    if (disconnected) {
+    if (reconnecting) {
+      statusLabel = 'Reconnecting';
+      statusColor = scheme.tertiary;
+    } else if (disconnected) {
       statusLabel = 'Disconnected';
       statusColor = scheme.error;
-    } else if (!connected) {
+    } else if (connectingProto) {
       statusLabel = 'Connecting';
       statusColor = scheme.tertiary;
     } else if (motorActive) {
@@ -108,9 +140,11 @@ class _Card extends StatelessWidget {
     }
 
     final String bodyText;
-    if (disconnected) {
+    if (reconnecting) {
+      bodyText = 'Reconnecting…';
+    } else if (disconnected) {
       bodyText = 'Disconnected';
-    } else if (!connected) {
+    } else if (connectingProto) {
       bodyText = 'Connecting…';
     } else if (motorActive) {
       bodyText = 'Moving…';
@@ -134,22 +168,22 @@ class _Card extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: theme.textTheme.titleMedium),
+                  Text(name, style: theme.textTheme.titleMedium, overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 2),
                   Text(
                     bodyText,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: disconnected
+                      color: !reconnecting && disconnected
                           ? scheme.error
-                          : motorActive
+                          : !reconnecting && motorActive
                               ? scheme.secondary
-                              : theme.textTheme.bodySmall?.color
-                                  ?.withValues(alpha: 0.6),
+                              : theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                     ),
                   ),
                 ],
               ),
             ),
+            const SizedBox(width: 8),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -197,8 +231,12 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final fontSize =
+        label.length <= 10 ? (theme.textTheme.labelSmall?.fontSize ?? 12) * 0.9 : theme.textTheme.labelSmall?.fontSize;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      constraints: const BoxConstraints(maxWidth: 64, minWidth: 64),
+      alignment: Alignment.center,
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(999),
@@ -209,7 +247,9 @@ class _StatusChip extends StatelessWidget {
         style: theme.textTheme.labelSmall?.copyWith(
           color: color,
           fontWeight: FontWeight.w600,
+          fontSize: fontSize,
         ),
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }

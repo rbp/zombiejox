@@ -1,6 +1,8 @@
 import 'dart:async';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zombiejox/ble/ble_connection_state.dart';
 import 'package:zombiejox/ble/device_ref.dart';
 import 'package:zombiejox/devices/dumbbell.dart';
 import 'package:zombiejox/devices/weight_group.dart';
@@ -9,8 +11,10 @@ import 'package:zombiejox/protocol/dumbbell_state.dart';
 /// Test double for [Dumbbell] that records calls and never touches BLE.
 ///
 /// `Dumbbell`'s constructor wires up a `BleConnection` for `device` but does
-/// no I/O at construction; overriding the public methods keeps all tests
-/// hermetic. State emissions are routed through a private broadcast
+/// no I/O at construction; overriding the public methods + the
+/// [connectionState] getter keeps all tests hermetic (the production
+/// getter would otherwise trip `flutter_blue_plus`'s platform-channel
+/// check). State emissions are routed through a private broadcast
 /// controller so we can drive the `WeightGroup`'s per-member listener.
 class FakeDumbbell extends Dumbbell {
   FakeDumbbell(super.device, {this.startsReady = true});
@@ -22,6 +26,8 @@ class FakeDumbbell extends Dumbbell {
 
   final StreamController<DumbbellState> _states =
       StreamController<DumbbellState>.broadcast();
+  final StreamController<BleConnectionState> _conn =
+      StreamController<BleConnectionState>.broadcast();
   DumbbellState? _last;
 
   bool connectCalled = false;
@@ -31,6 +37,21 @@ class FakeDumbbell extends Dumbbell {
   /// If set, `connect()` awaits this completer before returning. Lets a test
   /// hold a connect open while exercising other operations on the group.
   Completer<void>? _connectGate;
+
+  /// If set, `reconnect()` awaits this completer before returning — lets
+  /// the supervisor's `attempting` phase be observed before the next
+  /// transition fires.
+  Completer<void>? _reconnectGate;
+
+  /// Counts every call to [reconnect] — drives the backoff-schedule
+  /// assertions in the §2a reconnect tests.
+  int reconnectCallCount = 0;
+
+  /// When true, the next [reconnect] throws [reconnectError]. Tests use
+  /// this to simulate the dumbbell still being out of range when a
+  /// backoff timer fires.
+  bool failReconnect = false;
+  Object reconnectError = StateError('fake reconnect failure');
 
   final List<int> setWeightCalls = [];
   bool failSetWeight = false;
@@ -45,6 +66,9 @@ class FakeDumbbell extends Dumbbell {
 
   @override
   Stream<DumbbellState> get states => _states.stream;
+
+  @override
+  Stream<BleConnectionState> get connectionState => _conn.stream;
 
   @override
   DumbbellState? get lastState => _last;
@@ -76,6 +100,29 @@ class FakeDumbbell extends Dumbbell {
     c?.complete();
   }
 
+  /// Hold `reconnect()` open until [completeReconnect] is called.
+  void delayReconnect() {
+    _reconnectGate = Completer<void>();
+  }
+
+  void completeReconnect() {
+    final c = _reconnectGate;
+    _reconnectGate = null;
+    c?.complete();
+  }
+
+  /// Simulate a mid-session BLE drop after the dumbbell has been ready:
+  /// pushes a `disconnected` event on the conn stream and clears the
+  /// state the WeightGroup supervisor will inspect (so `isReady` flips
+  /// false synchronously and the next `setWeightIndex` skips this
+  /// device). Mirrors what production `Dumbbell.handleTransportDrop`
+  /// does internally.
+  void simulateDrop() {
+    _last = null;
+    _ready = false;
+    _conn.add(BleConnectionState.disconnected);
+  }
+
   @override
   Future<void> connect() async {
     connectCalled = true;
@@ -91,6 +138,24 @@ class FakeDumbbell extends Dumbbell {
   }
 
   @override
+  void handleTransportDrop() {
+    // Match the production reset semantics on the fake's bookkeeping so
+    // a subsequent `setWeightIndex` correctly skips this dumbbell.
+    _last = null;
+    _ready = false;
+  }
+
+  @override
+  Future<void> reconnect() async {
+    reconnectCallCount++;
+    if (_reconnectGate != null) {
+      await _reconnectGate!.future;
+    }
+    if (failReconnect) throw reconnectError;
+    if (startsReady) _ready = true;
+  }
+
+  @override
   Future<void> setWeightIndex(int index) async {
     setWeightCalls.add(index);
     if (failSetWeight) throw setWeightError;
@@ -100,6 +165,7 @@ class FakeDumbbell extends Dumbbell {
   Future<void> disconnect() async {
     disconnectCalled = true;
     if (!_states.isClosed) await _states.close();
+    if (!_conn.isClosed) await _conn.close();
   }
 }
 
@@ -706,6 +772,386 @@ void main() {
       expect(group.lastSnapshot.failed, isEmpty,
           reason: 'racing failure must not resurrect the dismissed slot');
       expect(fakes.single.disconnectCalled, isTrue);
+    });
+  });
+
+  group('auto-reconnect on transport drop (§2a)', () {
+    test(
+        'triggers retry when a once-ready member drops; first attempt is '
+        'immediate, success clears the retry state', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      fakes.single.emitState(const DumbbellState(
+          weightIndex: 2, motorActive: false, batteryPct: 80));
+      await pumpEventQueue();
+      expect(group.lastSnapshot.anyReady, isTrue);
+
+      fakes.single.simulateDrop();
+      await pumpEventQueue();
+
+      // First retry is immediate — reconnect() must have been called.
+      expect(fakes.single.reconnectCallCount, greaterThanOrEqualTo(1),
+          reason: 'backoff[0] is Duration.zero — fires on next tick');
+
+      // The post-reconnect state arrival clears the retry entry.
+      fakes.single.emitState(const DumbbellState(
+          weightIndex: 2, motorActive: false, batteryPct: 80));
+      await pumpEventQueue();
+
+      expect(
+        group.lastSnapshot.retryStates[const DeviceRef(id: 'AA:01')],
+        isNull,
+        reason: 'state arrival ⇒ retry cleared',
+      );
+      expect(group.lastSnapshot.anyReady, isTrue);
+    });
+
+    test(
+        'drop on a member that never became ready does NOT trigger retry — '
+        'that path is the existing _failed flow', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d, startsReady: false);
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      // No emitState — fake stays not-ready. Now push a disconnect on
+      // the conn stream as if the device went away mid-connect.
+      fakes.single._conn.add(BleConnectionState.disconnected);
+      await pumpEventQueue();
+
+      expect(fakes.single.reconnectCallCount, 0,
+          reason: 'never-ready ⇒ supervisor stays out of the way');
+      expect(group.lastSnapshot.retryStates, isEmpty);
+    });
+
+    test(
+        'connect failure (initial add path) goes to `failed`, not '
+        '`retryStates` — retry supervision only kicks in post-ready', () async {
+      final group = WeightGroup(newDumbbell: (d) {
+        return FakeDumbbell(d)..failConnect = true;
+      });
+      await group.add(_device('AA:01'));
+      await pumpEventQueue();
+
+      expect(group.lastSnapshot.failed, hasLength(1));
+      expect(group.lastSnapshot.retryStates, isEmpty);
+    });
+
+    test('drop emits a snapshot with retryStates entry for the device',
+        () async {
+      final emissions = <Map<DeviceRef, RetryState>>[];
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d);
+        fakes.add(f);
+        return f;
+      });
+      final sub = group.snapshots.listen((s) => emissions.add(s.retryStates));
+      await group.add(_device('AA:01'));
+      fakes.single.emitState(const DumbbellState(
+          weightIndex: 2, motorActive: false, batteryPct: 80));
+      await pumpEventQueue();
+      emissions.clear();
+
+      // Hold the reconnect open so the supervisor's `waiting → attempting`
+      // transition is observable in the emissions list.
+      fakes.single.delayReconnect();
+      fakes.single.simulateDrop();
+      await pumpEventQueue();
+
+      // At least one emission carries a non-empty retryStates with the
+      // device present.
+      final withRetry = emissions
+          .where((m) => m[const DeviceRef(id: 'AA:01')] != null)
+          .toList();
+      expect(withRetry, isNotEmpty,
+          reason: 'drop ⇒ supervisor emits a snapshot mentioning the slot');
+
+      fakes.single.completeReconnect();
+      await sub.cancel();
+    });
+
+    test(
+        'backoff schedule: failed attempts trigger the documented '
+        '0s, 2s, 5s sequence', () {
+      // Margins are generous (~half a backoff step on either side of
+      // each boundary) so the test is robust to fakeAsync's exact
+      // "fires at <= elapsed-time" semantics without compromising what
+      // it actually verifies: backoff[0] is immediate, backoff[1]=2s,
+      // backoff[2]=5s.
+      fakeAsync((async) {
+        final fakes = <FakeDumbbell>[];
+        final group = WeightGroup(newDumbbell: (d) {
+          final f = FakeDumbbell(d)..failReconnect = true;
+          fakes.add(f);
+          return f;
+        });
+        unawaited(group.add(_device('AA:01')));
+        async.flushMicrotasks();
+        fakes.single.emitState(const DumbbellState(
+            weightIndex: 2, motorActive: false, batteryPct: 80));
+        async.flushMicrotasks();
+
+        fakes.single.simulateDrop();
+        async.flushMicrotasks();
+
+        // backoff[0] = 0s — first attempt fires on the next event loop turn.
+        async.elapse(const Duration(milliseconds: 100));
+        expect(fakes.single.reconnectCallCount, 1,
+            reason: 'attempt #1: backoff[0] = 0s');
+
+        // 1.5s after #1 fired — backoff[1] = 2s, still waiting.
+        async.elapse(const Duration(milliseconds: 1500));
+        expect(fakes.single.reconnectCallCount, 1,
+            reason: 'attempt #2 is gated by the 2s backoff');
+
+        // Cross past 2s.
+        async.elapse(const Duration(milliseconds: 1000));
+        expect(fakes.single.reconnectCallCount, 2,
+            reason: 'attempt #2 fires once 2s has elapsed');
+
+        // 4s after #2 fired — backoff[2] = 5s, still waiting.
+        async.elapse(const Duration(milliseconds: 4000));
+        expect(fakes.single.reconnectCallCount, 2,
+            reason: 'attempt #3 is gated by the 5s backoff');
+
+        // Cross past 5s.
+        async.elapse(const Duration(milliseconds: 2000));
+        expect(fakes.single.reconnectCallCount, 3,
+            reason: 'attempt #3 fires once 5s has elapsed');
+
+        // Tear down so fakeAsync doesn't complain about pending timers.
+        unawaited(group.disconnectAll());
+        async.flushMicrotasks();
+        async.flushTimers();
+      });
+    });
+
+    test('remove() during a waiting backoff cancels the pending retry timer',
+        () {
+      fakeAsync((async) {
+        final fakes = <FakeDumbbell>[];
+        final group = WeightGroup(newDumbbell: (d) {
+          final f = FakeDumbbell(d)..failReconnect = true;
+          fakes.add(f);
+          return f;
+        });
+        unawaited(group.add(_device('AA:01')));
+        async.flushMicrotasks();
+        fakes.single.emitState(const DumbbellState(
+            weightIndex: 0, motorActive: false, batteryPct: 80));
+        async.flushMicrotasks();
+
+        fakes.single.simulateDrop();
+        async.flushMicrotasks();
+        async.elapse(const Duration(milliseconds: 1)); // attempt #1 fires
+        async.flushMicrotasks();
+        expect(fakes.single.reconnectCallCount, 1);
+
+        // Now a 2s backoff is scheduled. Remove before it fires.
+        unawaited(group.remove(_device('AA:01')));
+        async.flushMicrotasks();
+
+        async.elapse(const Duration(seconds: 30));
+        expect(fakes.single.reconnectCallCount, 1,
+            reason: 'remove() must cancel the pending retry timer');
+        async.flushTimers();
+      });
+    });
+
+    test(
+        'remove() during attempting: the racing reconnect future cannot '
+        'resurrect the dismissed slot', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d)..delayReconnect();
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      fakes.single.emitState(const DumbbellState(
+          weightIndex: 0, motorActive: false, batteryPct: 80));
+      await pumpEventQueue();
+
+      fakes.single.simulateDrop();
+      await pumpEventQueue();
+      // Immediate attempt is now gated on the reconnectGate.
+      expect(fakes.single.reconnectCallCount, 1);
+
+      await group.remove(_device('AA:01'));
+      // Release the gate — reconnect resolves, but the supervisor's
+      // _consumerStillCares check has already evicted the slot.
+      fakes.single.completeReconnect();
+      await pumpEventQueue();
+
+      expect(group.lastSnapshot.connected, isEmpty,
+          reason: 'remove + racing reconnect must not re-add the slot');
+      expect(group.lastSnapshot.retryStates, isEmpty);
+      expect(fakes.single.disconnectCalled, isTrue);
+    });
+
+    test('disconnectAll() cancels pending retry timers', () {
+      fakeAsync((async) {
+        final fakes = <FakeDumbbell>[];
+        final group = WeightGroup(newDumbbell: (d) {
+          final f = FakeDumbbell(d)..failReconnect = true;
+          fakes.add(f);
+          return f;
+        });
+        unawaited(group.add(_device('AA:01')));
+        async.flushMicrotasks();
+        fakes.single.emitState(const DumbbellState(
+            weightIndex: 0, motorActive: false, batteryPct: 80));
+        async.flushMicrotasks();
+        fakes.single.simulateDrop();
+        async.flushMicrotasks();
+        async.elapse(const Duration(milliseconds: 1)); // attempt #1
+        async.flushMicrotasks();
+        expect(fakes.single.reconnectCallCount, 1);
+
+        unawaited(group.disconnectAll());
+        async.flushMicrotasks();
+
+        async.elapse(const Duration(seconds: 60));
+        expect(fakes.single.reconnectCallCount, 1,
+            reason: 'disconnectAll must cancel the pending retry');
+        async.flushTimers();
+      });
+    });
+
+    test(
+        'kickReconnectsForResume fast-forwards a waiting timer to fire '
+        'immediately', () {
+      fakeAsync((async) {
+        final fakes = <FakeDumbbell>[];
+        final group = WeightGroup(newDumbbell: (d) {
+          final f = FakeDumbbell(d)..failReconnect = true;
+          fakes.add(f);
+          return f;
+        });
+        unawaited(group.add(_device('AA:01')));
+        async.flushMicrotasks();
+        fakes.single.emitState(const DumbbellState(
+            weightIndex: 0, motorActive: false, batteryPct: 80));
+        async.flushMicrotasks();
+        fakes.single.simulateDrop();
+        async.flushMicrotasks();
+        async.elapse(const Duration(milliseconds: 1)); // attempt #1
+        async.flushMicrotasks();
+        expect(fakes.single.reconnectCallCount, 1);
+
+        // Now a 2s backoff is waiting. Resume should bring it to 0s.
+        group.kickReconnectsForResume();
+        async.flushMicrotasks();
+        expect(fakes.single.reconnectCallCount, 2,
+            reason: 'resume kick fast-forwards the waiting timer');
+
+        unawaited(group.disconnectAll());
+        async.flushTimers();
+      });
+    });
+
+    test(
+        'kickReconnectsForResume does NOT interrupt an in-flight '
+        'reconnect attempt', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d)..delayReconnect();
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      fakes.single.emitState(const DumbbellState(
+          weightIndex: 0, motorActive: false, batteryPct: 80));
+      await pumpEventQueue();
+      fakes.single.simulateDrop();
+      await pumpEventQueue();
+      expect(fakes.single.reconnectCallCount, 1,
+          reason: 'immediate attempt is gated on completeReconnect()');
+
+      group.kickReconnectsForResume();
+      await pumpEventQueue();
+
+      expect(fakes.single.reconnectCallCount, 1,
+          reason: 'resume kick must NOT race the in-flight reconnect');
+
+      fakes.single.completeReconnect();
+      await pumpEventQueue();
+    });
+
+    test(
+        'a second `disconnected` event arriving during the `attempting` '
+        'phase does NOT trigger a concurrent reconnect attempt', () async {
+      // Defense-in-depth: the connectionState listener filters
+      // `attempting` events out, and `_attemptReconnect` itself
+      // double-checks. Verify both guards by emitting a stray
+      // disconnect mid-reconnect.
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d)..delayReconnect();
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      fakes.single.emitState(const DumbbellState(
+          weightIndex: 0, motorActive: false, batteryPct: 80));
+      await pumpEventQueue();
+
+      fakes.single.simulateDrop();
+      await pumpEventQueue();
+      // First attempt is in flight, gated on reconnectGate.
+      expect(fakes.single.reconnectCallCount, 1);
+
+      // Stray second disconnect (e.g. from the underlying _ble's
+      // teardown emitting one more event before the swap completes).
+      fakes.single._conn.add(BleConnectionState.disconnected);
+      await pumpEventQueue();
+
+      expect(fakes.single.reconnectCallCount, 1,
+          reason: 'attempting-phase guards must suppress the duplicate');
+
+      fakes.single.completeReconnect();
+      await pumpEventQueue();
+    });
+
+    test(
+        'setWeightIndex during reconnect skips the reconnecting member '
+        'and reaches still-ready peers', () async {
+      final fakes = <FakeDumbbell>[];
+      final group = WeightGroup(newDumbbell: (d) {
+        final f = FakeDumbbell(d)..delayReconnect();
+        fakes.add(f);
+        return f;
+      });
+      await group.add(_device('AA:01'));
+      await group.add(_device('AA:02'));
+      for (final f in fakes) {
+        f.emitState(const DumbbellState(
+            weightIndex: 0, motorActive: false, batteryPct: 80));
+      }
+      await pumpEventQueue();
+
+      // First fake drops; second stays ready.
+      fakes[0].simulateDrop();
+      await pumpEventQueue();
+      expect(fakes[0].isReady, isFalse);
+      expect(fakes[1].isReady, isTrue);
+
+      await group.setWeightIndex(3);
+      expect(fakes[0].setWeightCalls, isEmpty,
+          reason: 'reconnecting member must not receive setWeightIndex');
+      expect(fakes[1].setWeightCalls, [3],
+          reason: 'ready peer must still receive setWeightIndex');
+
+      fakes[0].completeReconnect();
+      await pumpEventQueue();
     });
   });
 }

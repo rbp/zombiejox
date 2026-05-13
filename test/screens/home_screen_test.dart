@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,6 +33,8 @@ class _FakeDumbbell extends Dumbbell {
   final List<int> setWeightCalls = [];
   bool failSetWeight = false;
   bool failConnect = false;
+  bool failReconnect = false;
+  int reconnectCallCount = 0;
   bool disconnectCalled = false;
   bool _ready = false;
 
@@ -78,6 +82,27 @@ class _FakeDumbbell extends Dumbbell {
     if (!_conn.isClosed) await _conn.close();
   }
 
+  @override
+  void handleTransportDrop() {
+    _last = null;
+    _ready = false;
+  }
+
+  @override
+  Future<void> reconnect() async {
+    reconnectCallCount++;
+    if (failReconnect) throw StateError('fake reconnect failure');
+    _conn.add(BleConnectionState.connected);
+  }
+
+  /// Simulate a mid-session BLE drop after the dumbbell has been ready.
+  /// Mirrors the production [Dumbbell.handleTransportDrop] reset.
+  void simulateDrop() {
+    _last = null;
+    _ready = false;
+    _conn.add(BleConnectionState.disconnected);
+  }
+
   void emitState(DumbbellState s) {
     _last = s;
     _ready = true;
@@ -94,8 +119,7 @@ class _FakeScanner implements BleScanner {
   // initial event still see the current value — mirrors how the
   // production stream behaves (FlutterBluePlus.adapterState replays).
   BleAdapterState _adapter = BleAdapterState.on;
-  final _adapterStateController =
-      StreamController<BleAdapterState>.broadcast();
+  final _adapterStateController = StreamController<BleAdapterState>.broadcast();
   bool _scanning = false;
 
   @override
@@ -126,6 +150,15 @@ class _FakeScanner implements BleScanner {
   Future<void> stopScan() async {
     _scanning = false;
     _isScanning.add(false);
+  }
+
+  int turnOnBluetoothCalls = 0;
+  bool turnOnBluetoothResult = true;
+
+  @override
+  Future<bool> turnOnBluetooth() async {
+    turnOnBluetoothCalls++;
+    return turnOnBluetoothResult;
   }
 
   void emit(List<ScanHit> hits) => _results.add(hits);
@@ -257,8 +290,7 @@ void main() {
 
   testWidgets(
       'scan results filter out devices already in the top region '
-      '— promoted devices do NOT re-appear in the bottom list',
-      (tester) async {
+      '— promoted devices do NOT re-appear in the bottom list', (tester) async {
     final prefs = await _freshPrefs();
     final ctx = await _pumpHome(tester, prefs: prefs);
 
@@ -485,8 +517,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(prefs.rememberedDeviceIds, ['AA:01', 'AA:02'],
-        reason:
-            'post-verification promote-on-tap updates the remembered set');
+        reason: 'post-verification promote-on-tap updates the remembered set');
   });
 
   testWidgets(
@@ -544,28 +575,68 @@ void main() {
     // A. BT adapter state — banner replaces the scan placeholder when
     // the radio isn't usable, surfaces an "Open Settings" button.
     testWidgets(
-        'adapter state: BT off → banner + "Turn Bluetooth on" hint in '
-        'the scan area', (tester) async {
-      final prefs = await _freshPrefs();
-      final ctx = await _pumpHome(tester, prefs: prefs);
+        'adapter state: BT off on Android → banner + "Enable Bluetooth" '
+        'CTA that triggers `scanner.turnOnBluetooth` (in-app system '
+        'prompt, no app-settings detour)', (tester) async {
+      // Pin the target platform so a future Flutter change to the
+      // widget-test default doesn't silently shift this test. Reset
+      // inside the test body (not via addTearDown): the framework's
+      // invariant check fires before tearDowns run.
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      try {
+        final prefs = await _freshPrefs();
+        final ctx = await _pumpHome(tester, prefs: prefs);
 
-      // Initial state: adapter is on, no banner.
-      expect(find.textContaining('Bluetooth is off'), findsNothing);
+        // Initial state: adapter is on, no banner.
+        expect(find.textContaining('Bluetooth is off'), findsNothing);
 
-      ctx.scanner.emitAdapterState(BleAdapterState.off);
-      await tester.pumpAndSettle();
+        ctx.scanner.emitAdapterState(BleAdapterState.off);
+        await tester.pumpAndSettle();
 
-      expect(find.textContaining('Bluetooth is off'), findsOneWidget);
-      expect(find.text('Open Settings'), findsOneWidget,
-          reason: 'banner exposes a one-tap recovery affordance');
-      expect(find.text('Turn Bluetooth on to scan.'), findsOneWidget,
-          reason: 'scan-area copy is consistent with the banner');
+        expect(find.textContaining('Bluetooth is off'), findsOneWidget);
+        expect(find.text('Enable Bluetooth'), findsOneWidget,
+            reason: 'Android off-state CTA pops the in-app enable prompt');
+        expect(find.text('Open Settings'), findsNothing,
+            reason: 'off-state must NOT route to app settings');
+        expect(find.text('Turn Bluetooth on to scan.'), findsOneWidget,
+            reason: 'scan-area copy is consistent with the banner');
 
-      // Bringing BT back on hides both the banner and the "off" copy.
-      ctx.scanner.emitAdapterState(BleAdapterState.on);
-      await tester.pumpAndSettle();
-      expect(find.textContaining('Bluetooth is off'), findsNothing);
-      expect(find.text('Turn Bluetooth on to scan.'), findsNothing);
+        await tester.tap(find.text('Enable Bluetooth'));
+        await tester.pumpAndSettle();
+        expect(ctx.scanner.turnOnBluetoothCalls, 1,
+            reason: 'CTA must call scanner.turnOnBluetooth');
+
+        // Bringing BT back on hides both the banner and the "off" copy.
+        ctx.scanner.emitAdapterState(BleAdapterState.on);
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Bluetooth is off'), findsNothing);
+        expect(find.text('Turn Bluetooth on to scan.'), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    testWidgets(
+        'adapter state: BT off on iOS → banner shows instructional text '
+        '(no programmatic CTA — iOS doesn\'t expose a toggle)', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        final prefs = await _freshPrefs();
+        final ctx = await _pumpHome(tester, prefs: prefs);
+        ctx.scanner.emitAdapterState(BleAdapterState.off);
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('Bluetooth is off'), findsOneWidget);
+        expect(find.text('Enable Bluetooth'), findsNothing,
+            reason: 'iOS has no programmatic BT toggle — hide the CTA');
+        expect(find.text('Open Settings'), findsNothing,
+            reason: 'app settings is for permission issues, not BT-off');
+        expect(
+            find.textContaining('Settings or Control Center'), findsOneWidget,
+            reason: 'iOS instructional copy points the user to the OS');
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     });
 
     testWidgets(
@@ -582,15 +653,14 @@ void main() {
           findsOneWidget);
       expect(find.text('Open Settings'), findsNothing);
       // Scan-area copy is tailored too — NOT "turn it on".
-      expect(find.text('Scanning is unavailable on this device.'),
-          findsOneWidget);
+      expect(
+          find.text('Scanning is unavailable on this device.'), findsOneWidget);
       expect(find.text('Turn Bluetooth on to scan.'), findsNothing);
     });
 
     testWidgets(
         'adapter state: unauthorized → distinct "permission denied" '
-        'banner (not the "off" or "unsupported" wording)',
-        (tester) async {
+        'banner (not the "off" or "unsupported" wording)', (tester) async {
       final prefs = await _freshPrefs();
       final ctx = await _pumpHome(tester, prefs: prefs);
       ctx.scanner.emitAdapterState(BleAdapterState.unauthorized);
@@ -599,8 +669,7 @@ void main() {
       expect(find.textContaining('Bluetooth permission was denied'),
           findsOneWidget);
       expect(find.text('Open Settings'), findsOneWidget);
-      expect(find.text('Grant Bluetooth permission to scan.'),
-          findsOneWidget);
+      expect(find.text('Grant Bluetooth permission to scan.'), findsOneWidget);
     });
 
     // B. Permission revoked mid-session — on AppLifecycleState.resumed,
@@ -649,8 +718,7 @@ void main() {
     // C. All-out-of-range → empty-state hint + Scan again button.
     testWidgets(
         'scan ends with no results → "No JaxJox dumbbells found" hint '
-        'and a Scan again button that restarts the scanner',
-        (tester) async {
+        'and a Scan again button that restarts the scanner', (tester) async {
       final prefs = await _freshPrefs();
       final ctx = await _pumpHome(tester, prefs: prefs);
       expect(ctx.scanner.isScanningNow, isTrue);
@@ -677,6 +745,177 @@ void main() {
 
       expect(find.text('Scanning for JaxJox devices…'), findsOneWidget);
       expect(find.text('No JaxJox dumbbells found.'), findsNothing);
+    });
+  });
+
+  group('reconnect (§2a)', () {
+    testWidgets(
+        'mid-session drop on a ready dumbbell → card renders '
+        '"Reconnecting…" (driven by snapshot.retryStates)', (tester) async {
+      final prefs = await _freshPrefs(remembered: ['AA:01']);
+      final ctx = await _pumpHome(tester, prefs: prefs);
+      ctx.fakes.single.emitState(
+        const DumbbellState(weightIndex: 2, motorActive: false, batteryPct: 80),
+      );
+      await tester.pumpAndSettle();
+
+      ctx.fakes.single.simulateDrop();
+      await tester.pumpAndSettle();
+
+      // Status chip and body line both say "Reconnecting" / "Reconnecting…".
+      expect(find.text('Reconnecting…'), findsOneWidget,
+          reason: 'snapshot.retryStates ⇒ Reconnecting body line');
+      expect(find.text('Reconnecting'), findsOneWidget,
+          reason: 'and the status chip');
+      expect(find.text('Disconnected'), findsNothing,
+          reason: 'retryState preempts the bare Disconnected fallback');
+      // reconnect() was called by the supervisor's immediate first attempt.
+      expect(ctx.fakes.single.reconnectCallCount, greaterThanOrEqualTo(1));
+    });
+
+    testWidgets(
+        'AppLifecycleState.resumed with permissions granted: '
+        'kickReconnectsForResume fast-forwards a waiting reconnect',
+        (tester) async {
+      // failReconnect=true so the immediate attempt fails and the
+      // supervisor enters a 2s wait; the resume kick should
+      // fast-forward that wait.
+      final prefs = await _freshPrefs(remembered: ['AA:01']);
+      final scanner = _FakeScanner();
+      addTearDown(scanner.dispose);
+      final fakes = <_FakeDumbbell>[];
+
+      await tester.pumpWidget(MaterialApp(
+        home: HomeScreen(
+          preferences: prefs,
+          checkPermissionsGranted: () async => true,
+          scanner: scanner,
+          createWeightGroup: () => WeightGroup(newDumbbell: (d) {
+            final f = _FakeDumbbell(d)..failReconnect = true;
+            fakes.add(f);
+            return f;
+          }),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      fakes.single.emitState(
+        const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
+      );
+      await tester.pumpAndSettle();
+
+      fakes.single.simulateDrop();
+      await tester.pumpAndSettle();
+      expect(fakes.single.reconnectCallCount, 1,
+          reason: 'immediate first attempt fired');
+
+      // Simulate resume.
+      tester.binding.handleAppLifecycleStateChanged(
+        AppLifecycleState.inactive,
+      );
+      tester.binding.handleAppLifecycleStateChanged(
+        AppLifecycleState.resumed,
+      );
+      await tester.pumpAndSettle();
+
+      expect(fakes.single.reconnectCallCount, 2,
+          reason: 'resume kick fast-forwarded the waiting timer');
+    });
+
+    testWidgets(
+        'BleAdapterState transition off → on fast-forwards a waiting '
+        'reconnect (BT toggled off then on, app stays foregrounded)',
+        (tester) async {
+      // Without this, retries that climbed to the 60s cap while BT was
+      // off would keep the user on "Reconnecting…" for up to a minute
+      // after they flip BT back on. The lifecycle-resume kick doesn't
+      // help — the app never backgrounds.
+      final prefs = await _freshPrefs(remembered: ['AA:01']);
+      final scanner = _FakeScanner();
+      addTearDown(scanner.dispose);
+      final fakes = <_FakeDumbbell>[];
+
+      await tester.pumpWidget(MaterialApp(
+        home: HomeScreen(
+          preferences: prefs,
+          checkPermissionsGranted: () async => true,
+          scanner: scanner,
+          createWeightGroup: () => WeightGroup(newDumbbell: (d) {
+            final f = _FakeDumbbell(d)..failReconnect = true;
+            fakes.add(f);
+            return f;
+          }),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      fakes.single.emitState(
+        const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
+      );
+      await tester.pumpAndSettle();
+
+      // BT goes off: supervisor sees the drop, schedules the immediate
+      // first attempt (which fails because BT is off), then waits at 2s.
+      fakes.single.simulateDrop();
+      await tester.pumpAndSettle();
+      expect(fakes.single.reconnectCallCount, 1,
+          reason: 'immediate first attempt fired');
+
+      // The "BT is off" banner state.
+      scanner.emitAdapterState(BleAdapterState.off);
+      await tester.pumpAndSettle();
+
+      // BT comes back on → kick fires immediately, no 2s wait.
+      scanner.emitAdapterState(BleAdapterState.on);
+      await tester.pumpAndSettle();
+
+      expect(fakes.single.reconnectCallCount, 2,
+          reason: 'BT-on transition must fast-forward the waiting timer');
+    });
+
+    testWidgets(
+        'AppLifecycleState.resumed with permissions revoked: routes to '
+        'PermissionScreen AND does NOT call reconnect', (tester) async {
+      final prefs = await _freshPrefs(remembered: ['AA:01']);
+      var granted = true;
+      final scanner = _FakeScanner();
+      addTearDown(scanner.dispose);
+      final fakes = <_FakeDumbbell>[];
+
+      await tester.pumpWidget(MaterialApp(
+        home: HomeScreen(
+          preferences: prefs,
+          checkPermissionsGranted: () async => granted,
+          scanner: scanner,
+          createWeightGroup: () => WeightGroup(newDumbbell: (d) {
+            final f = _FakeDumbbell(d)..failReconnect = true;
+            fakes.add(f);
+            return f;
+          }),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      fakes.single.emitState(
+        const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
+      );
+      await tester.pumpAndSettle();
+      fakes.single.simulateDrop();
+      await tester.pumpAndSettle();
+      expect(fakes.single.reconnectCallCount, 1);
+      final beforeResume = fakes.single.reconnectCallCount;
+
+      // Revoke + resume.
+      granted = false;
+      tester.binding.handleAppLifecycleStateChanged(
+        AppLifecycleState.inactive,
+      );
+      tester.binding.handleAppLifecycleStateChanged(
+        AppLifecycleState.resumed,
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(PermissionScreen), findsOneWidget);
+      expect(fakes.single.reconnectCallCount, beforeResume,
+          reason: 'revoked permissions ⇒ no extra reconnect attempts');
     });
   });
 }
