@@ -27,10 +27,18 @@ import '../state/weights.dart' show kJaxJoxWeightCount;
 /// broadcast controller so subscribers stay attached across the
 /// underlying transport swap.
 class Dumbbell {
-  /// Non-final because [reconnect] swaps in a fresh [BleConnection] for the
+  /// Non-final because [reconnect] swaps in a fresh transport for the
   /// same [DeviceRef] after a transport drop. The swap is internal —
   /// subscribers to [connectionState] / [states] are unaffected.
   BleTransport _ble;
+
+  /// Factory used by [reconnect] to construct the post-swap transport.
+  /// Defaults to [BleConnection.new]; the constructor seam lets tests
+  /// inject a fake [BleTransport] so the proxy/replay behavior of
+  /// [connectionState] can be exercised end-to-end without the
+  /// `flutter_blue_plus` platform channel.
+  final BleTransport Function(DeviceRef) _transportFactory;
+
   final DeviceRef device;
 
   final StreamController<DumbbellState> _states =
@@ -58,6 +66,15 @@ class Dumbbell {
   /// out [_connFwd]), so [disconnect] knows whether the controller
   /// needs closing even if no listener is currently attached.
   bool _connControllerEverWired = false;
+
+  /// Cache of the most recent state forwarded into
+  /// [_connStateController]. Replayed to each new public subscriber
+  /// via the [connectionState] getter's `Stream.multi` wrapper —
+  /// broadcast controllers don't replay, so without this cache a card
+  /// (or any other late subscriber) that joins after the underlying
+  /// `_ble.connectionState` has already emitted `connected` would sit
+  /// on null indefinitely, rendering "Connecting…" forever.
+  BleConnectionState? _latestConn;
 
   DumbbellState? _last;
   DumbbellState? get lastState => _last;
@@ -92,14 +109,47 @@ class Dumbbell {
   /// connection emits its first state frame.
   bool get isReady => !_disposed && lastState != null;
 
-  Stream<BleConnectionState> get connectionState => _connStateController.stream;
+  Stream<BleConnectionState> get connectionState =>
+      Stream<BleConnectionState>.multi((controller) {
+        // Replay the latest forwarded state to this listener so a
+        // late subscriber doesn't sit on null. The underlying
+        // `_ble.connectionState` (production: `flutter_blue_plus`'s
+        // `BluetoothDevice.connectionState`) behaves like a
+        // BehaviorSubject — it emits the current value on each new
+        // subscription. The broadcast controller [_connStateController]
+        // we proxy through does not. Cache + replay closes the gap so
+        // a `DumbbellCard` that builds *after* `WeightGroup` has
+        // already wired its supervisor listener still sees the current
+        // state on its first frame.
+        if (_disposed) {
+          unawaited(controller.close());
+          return;
+        }
+        final latest = _latestConn;
+        if (latest != null) controller.add(latest);
+        final sub = _connStateController.stream.listen(
+          controller.add,
+          onError: controller.addError,
+          onDone: controller.close,
+        );
+        controller.onCancel = () async {
+          await sub.cancel();
+        };
+      });
 
   StreamSubscription<List<int>>? _rxSub;
 
-  /// Constructs a [Dumbbell] driven by the production [BleConnection].
-  /// Tests that need a transport seam should subclass [Dumbbell] directly
-  /// (see `FakeDumbbell` in `test/devices/weight_group_test.dart`).
-  Dumbbell(this.device) : _ble = BleConnection(device);
+  /// Constructs a [Dumbbell] driven by the production [BleConnection]
+  /// for the given [device]. The optional [transportFactory] is a test
+  /// seam — tests that need to exercise the production [connectionState]
+  /// proxy (its latest-state replay to late subscribers, transport swap
+  /// on [reconnect], etc.) inject a factory returning a fake
+  /// [BleTransport]. The pre-existing `FakeDumbbell` pattern (subclass
+  /// + override public methods) remains the right choice when the test
+  /// doesn't care about the proxy's internals.
+  Dumbbell(this.device, {BleTransport Function(DeviceRef)? transportFactory})
+      : _transportFactory = transportFactory ?? BleConnection.new,
+        _ble = (transportFactory ?? BleConnection.new)(device);
 
   /// Subscribes to whichever [_ble] is current and pumps its
   /// [BleTransport.connectionState] events into [_connStateController].
@@ -114,6 +164,7 @@ class Dumbbell {
     final old = _connFwd;
     if (old != null) unawaited(old.cancel());
     _connFwd = _ble.connectionState.listen((s) {
+      _latestConn = s;
       if (_connStateController.isClosed) return;
       _connStateController.add(s);
     });
@@ -209,7 +260,12 @@ class Dumbbell {
       await old.disconnect();
     } catch (_) {/* best-effort */}
     if (_disposed) return;
-    _ble = BleConnection(device);
+    _ble = _transportFactory(device);
+    // The new transport's first-emitted state will overwrite
+    // [_latestConn] via the forwarder; clearing here would briefly
+    // expose `null` to a late subscriber that races the rewire. The
+    // old cached value (typically `disconnected` from the drop) is a
+    // safe stand-in until the new replay arrives.
     // Re-wire only if someone was listening before the swap — the
     // controller's `onListen` would otherwise wire on the next
     // subscription. Skipping the re-wire when there are no listeners
