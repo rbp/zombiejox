@@ -10,6 +10,7 @@ import 'package:zombiejox/devices/dumbbell.dart';
 import 'package:zombiejox/devices/weight_group.dart';
 import 'package:zombiejox/protocol/dumbbell_state.dart';
 import 'package:zombiejox/screens/home_screen.dart';
+import 'package:zombiejox/screens/permission_screen.dart';
 import 'package:zombiejox/state/preferences.dart';
 import 'package:zombiejox/state/weights.dart';
 import 'package:zombiejox/widgets/dumbbell_card.dart';
@@ -89,6 +90,12 @@ class _FakeDumbbell extends Dumbbell {
 class _FakeScanner implements BleScanner {
   final _results = StreamController<List<ScanHit>>.broadcast();
   final _isScanning = StreamController<bool>.broadcast();
+  // Replay-on-listen for adapterState so subscribers added after the
+  // initial event still see the current value — mirrors how the
+  // production stream behaves (FlutterBluePlus.adapterState replays).
+  BleAdapterState _adapter = BleAdapterState.on;
+  final _adapterStateController =
+      StreamController<BleAdapterState>.broadcast();
   bool _scanning = false;
 
   @override
@@ -99,6 +106,12 @@ class _FakeScanner implements BleScanner {
 
   @override
   Stream<List<ScanHit>> get results => _results.stream;
+
+  @override
+  Stream<BleAdapterState> get adapterState async* {
+    yield _adapter;
+    yield* _adapterStateController.stream;
+  }
 
   @override
   Future<void> startScan({
@@ -117,9 +130,17 @@ class _FakeScanner implements BleScanner {
 
   void emit(List<ScanHit> hits) => _results.add(hits);
 
+  /// Drive the adapter-state stream from tests — covers the "BT off
+  /// mid-session" + "BT comes back on" transitions.
+  void emitAdapterState(BleAdapterState s) {
+    _adapter = s;
+    _adapterStateController.add(s);
+  }
+
   Future<void> dispose() async {
     await _results.close();
     await _isScanning.close();
+    await _adapterStateController.close();
   }
 }
 
@@ -507,6 +528,9 @@ void main() {
     final ctx = await _pumpHome(tester, prefs: prefs);
     expect(ctx.scanner.isScanningNow, isTrue);
 
+    // Scope to the scan header — when the scanner stops with no
+    // results, the empty-state UI surfaces its own "Scan again" button
+    // and `find.byTooltip` would otherwise be ambiguous.
     await tester.tap(find.byTooltip('Stop scanning'));
     await tester.pumpAndSettle();
     expect(ctx.scanner.isScanningNow, isFalse);
@@ -514,5 +538,122 @@ void main() {
     await tester.tap(find.byTooltip('Scan again'));
     await tester.pumpAndSettle();
     expect(ctx.scanner.isScanningNow, isTrue);
+  });
+
+  group('edge cases — §1h', () {
+    // A. BT adapter state — banner replaces the scan placeholder when
+    // the radio isn't usable, surfaces an "Open Settings" button.
+    testWidgets(
+        'adapter state: BT off → banner + "Turn Bluetooth on" hint in '
+        'the scan area', (tester) async {
+      final prefs = await _freshPrefs();
+      final ctx = await _pumpHome(tester, prefs: prefs);
+
+      // Initial state: adapter is on, no banner.
+      expect(find.textContaining('Bluetooth is off'), findsNothing);
+
+      ctx.scanner.emitAdapterState(BleAdapterState.off);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Bluetooth is off'), findsOneWidget);
+      expect(find.text('Open Settings'), findsOneWidget,
+          reason: 'banner exposes a one-tap recovery affordance');
+      expect(find.text('Turn Bluetooth on to scan.'), findsOneWidget,
+          reason: 'scan-area copy is consistent with the banner');
+
+      // Bringing BT back on hides both the banner and the "off" copy.
+      ctx.scanner.emitAdapterState(BleAdapterState.on);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Bluetooth is off'), findsNothing);
+      expect(find.text('Turn Bluetooth on to scan.'), findsNothing);
+    });
+
+    testWidgets(
+        'adapter state: unsupported → distinct banner copy (terminal '
+        'platform state, not a "turn it on" prompt)', (tester) async {
+      final prefs = await _freshPrefs();
+      final ctx = await _pumpHome(tester, prefs: prefs);
+      ctx.scanner.emitAdapterState(BleAdapterState.unsupported);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Bluetooth Low Energy is not available'),
+          findsOneWidget);
+    });
+
+    // B. Permission revoked mid-session — on AppLifecycleState.resumed,
+    // re-check; if revoked, push back to PermissionScreen.
+    testWidgets(
+        'permission revoked while backgrounded → on resume, '
+        'pushReplacement to PermissionScreen', (tester) async {
+      final prefs = await _freshPrefs();
+      // Start with permissions granted, then flip the seam to revoked
+      // before pushing the lifecycle event so the resume re-check sees
+      // the new value.
+      var granted = true;
+      final scanner = _FakeScanner();
+      addTearDown(scanner.dispose);
+
+      await tester.pumpWidget(MaterialApp(
+        home: HomeScreen(
+          preferences: prefs,
+          checkPermissionsGranted: () async => granted,
+          scanner: scanner,
+          createWeightGroup: () => WeightGroup(
+            newDumbbell: (d) => _FakeDumbbell(d),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(HomeScreen), findsOneWidget);
+
+      // Simulate Settings-app revocation.
+      granted = false;
+      // didChangeAppLifecycleState fires from the framework; trigger
+      // the inactive→resumed sequence so the observer runs.
+      tester.binding.handleAppLifecycleStateChanged(
+        AppLifecycleState.inactive,
+      );
+      tester.binding.handleAppLifecycleStateChanged(
+        AppLifecycleState.resumed,
+      );
+      await tester.pumpAndSettle();
+
+      // PermissionScreen replaced the route. HomeScreen is gone.
+      expect(find.byType(HomeScreen), findsNothing);
+      expect(find.byType(PermissionScreen), findsOneWidget);
+    });
+
+    // C. All-out-of-range → empty-state hint + Scan again button.
+    testWidgets(
+        'scan ends with no results → "No JaxJox dumbbells found" hint '
+        'and a Scan again button that restarts the scanner',
+        (tester) async {
+      final prefs = await _freshPrefs();
+      final ctx = await _pumpHome(tester, prefs: prefs);
+      expect(ctx.scanner.isScanningNow, isTrue);
+
+      // Scanner stops with no hits.
+      await ctx.scanner.stopScan();
+      await tester.pumpAndSettle();
+
+      expect(find.text('No JaxJox dumbbells found.'), findsOneWidget);
+      expect(find.textContaining('powered on and in range'), findsOneWidget);
+
+      // The in-place "Scan again" button — distinct from the toolbar
+      // refresh icon (which has tooltip 'Scan again' too).
+      await tester.tap(find.widgetWithText(FilledButton, 'Scan again'));
+      await tester.pumpAndSettle();
+      expect(ctx.scanner.isScanningNow, isTrue);
+    });
+
+    testWidgets(
+        'scan running with no results yet → "Scanning…" placeholder '
+        '(not the No-results hint)', (tester) async {
+      final prefs = await _freshPrefs();
+      await _pumpHome(tester, prefs: prefs);
+
+      expect(find.text('Scanning for JaxJox devices…'), findsOneWidget);
+      expect(find.text('No JaxJox dumbbells found.'), findsNothing);
+    });
   });
 }

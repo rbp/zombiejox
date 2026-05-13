@@ -54,7 +54,7 @@ The BLE protocol is undocumented. One third-party developer (Eamon Tuhami / X8IQ
 
 ---
 
-## Phase 1: Flutter MVP — 🟡 user flow complete; edge-case screens still pending
+## Phase 1: Flutter MVP — ✅ complete
 
 PRs merged against `main`:
 
@@ -74,7 +74,7 @@ PRs merged against `main`:
 
 The app's current user flow: rationale on first launch → grant → home screen. Home shows the selected devices at the top (seeded from warm-start memory on cold launch), the always-visible 8-tile weight grid in the middle, and live scan results in the bottom region. Tapping a scan card promotes it to the top + connects; tapping × on a top card disconnects and drops the slot. Settings/About via the AppBar gear. Toggling kg/lbs in Settings re-labels every weight tile live; on first connect, if the user hasn't picked a unit yet, the app silently matches whatever the docks are set to (SnackBar) or surfaces a "set one in Settings" hint if the docks disagree.
 
-The remaining MVP gap — **edge-case screens** (Bluetooth-off, all out of range, mid-session drops) — is tracked in §1h.
+All edge-case states the user can land in — Bluetooth off, permission revoked mid-session, all dumbbells out of range, a connected dumbbell drops mid-session — have explicit UI now (§1h). Remaining gates to ship are on-device verification (Phase 2 / 3); no implementation work outstanding for Phase 1.
 
 ### 1a. Create the Flutter project at the repo root — ✅ done
 
@@ -109,7 +109,7 @@ dart run flutter_launcher_icons
 dart run flutter_native_splash:create
 ```
 
-### 1d. Source layout — 🟡 only edge-case screens pending
+### 1d. Source layout — ✅ done
 
 ```
 lib/
@@ -156,13 +156,13 @@ android/app/src/main/AndroidManifest.xml   ✅
 ios/Runner/Info.plist                       ✅
 ```
 
-Total test count: **146 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
+Total test count: **152 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
 
 ### 1e. Platform setup — ✅ done
 
 Android `<uses-permission>` entries (`BLUETOOTH_SCAN` with `neverForLocation`, `BLUETOOTH_CONNECT`) and iOS `NSBluetoothAlwaysUsageDescription` are configured per the PR. Android minSdk is 31 (Android 12); Android ≤11 isn't supported because it'd require `ACCESS_FINE_LOCATION` for BLE scanning, which would also require either dropping the privacy-friendly `neverForLocation` flag or maintaining two code paths. iOS does not request `Permission.locationWhenInUse` (which would otherwise crash without `NSLocationWhenInUseUsageDescription` in Info.plist).
 
-### 1f. User flow — 🟡 user flow complete; edge-case screens still pending
+### 1f. User flow — ✅ done
 
 What works:
 - ✅ **First launch**: pre-permission rationale screen ("ZombieJox needs Bluetooth…") → Continue → OS prompt → Home. If the user denies, the screen flips to a "Permission was denied" state with `Open Settings` + `Try again` buttons.
@@ -175,8 +175,11 @@ What works:
 - ✅ Manual weight changes (via dock buttons) reflected in the UI via `0xD2` byte 11.
 - ✅ **Custom logo wired into icon and splash** — pixel-art zombie + dumbbell on cream `#F4ECD4`, adaptive on Android (cream background + transparent foreground PNG with launcher-applied 16% safe-zone inset), full-bleed cream on iOS. Splash matches.
 
-What's still needed to hit the MVP target:
-- ⏳ **Edge-case screens**: Bluetooth-off, all devices out of range, mid-session drops — currently undefined behaviour.
+Edge-case states (§1h):
+- ✅ **Bluetooth adapter off / unsupported**: HomeScreen subscribes to `BleScanner.adapterState` (new). When the radio isn't `on`, an inline error-coloured banner appears at the top of the body with an Open Settings button, and the scan list's empty-state copy switches to "Turn Bluetooth on to scan." The banner disappears when the user toggles BT back on.
+- ✅ **Permission revoked mid-session**: HomeScreen registers a `WidgetsBindingObserver`; on `AppLifecycleState.resumed` it re-runs the permission check and `pushReplacement`s back to `PermissionScreen` if BT permission was revoked while backgrounded.
+- ✅ **All dumbbells out of range**: when the scanner stops with zero hits, the scan-list placeholder switches from "Scanning for JaxJox devices…" to "No JaxJox dumbbells found. Make sure they're powered on and in range." plus a tonal "Scan again" button. The empty state is wrapped in a `SingleChildScrollView` so a tight bottom-region height (small phones, large-font scales) doesn't flex-overflow.
+- ✅ **Mid-session drop**: `DumbbellCard` distinguishes `BleConnectionState.disconnected` (after a successful connect) from the initial connecting state. The status chip flips to an error-coloured "Disconnected" and the body line spells it out, instead of falsely showing "Connecting…".
 
 ### 1g. Index ↔ weight lookup
 
@@ -193,13 +196,9 @@ What's still needed to hit the MVP target:
 
 (kg values match what the dock displays in kg mode — mostly the exact lb→kg conversion to 1 decimal, except index 6 which the dock shows as a whole `20`, not the converted `19.9`. On-device verified.)
 
-### 1h. Remaining work to close out Phase 1
+### 1h. Remaining work to close out Phase 1 — ✅ done
 
-✅ Done: `shared_preferences`; `state/weights.dart` (incl. `weightUnitFromRawByte`); reactive `state/preferences.dart` (units + remembered device IDs + explicit-choice flag); `state/{permission_request_flow,unit_auto_matcher}.dart`; `devices/{dumbbell,weight_group}.dart` (with `GroupSnapshot` + `remove()`); `widgets/{weight_button,dumbbell_card,failed_device_card}.dart`; `theme/app_theme.dart`; `screens/{home,permission,settings,about}_screen.dart`; promote-on-tap selection on the joint Home screen; per-card "×" remove; Settings/About reachable via gear icon; warm-start auto-reconnect to remembered dumbbells (seeds the top region in `connecting` state on the first frame); auto-match-from-dock on first connect; `0xD1` byte-8 unit parsing with on-device-confirmed mapping; custom launcher icon + splash.
-
-Still pending:
-
-1. **Edge-case screens** — Bluetooth disabled, permission denied (mid-session revoke), all devices out of range. Currently undefined behaviour.
+✅ Done: `shared_preferences`; `state/weights.dart` (incl. `weightUnitFromRawByte`); reactive `state/preferences.dart` (units + remembered device IDs + explicit-choice flag); `state/{permission_request_flow,unit_auto_matcher}.dart`; `devices/{dumbbell,weight_group}.dart` (with `GroupSnapshot` + `remove()`); `widgets/{weight_button,dumbbell_card,failed_device_card}.dart` (incl. disconnect-aware status); `theme/app_theme.dart`; `screens/{home,permission,settings,about}_screen.dart`; promote-on-tap selection on the joint Home screen; per-card "×" remove; Settings/About reachable via gear icon; warm-start auto-reconnect to remembered dumbbells (seeds the top region in `connecting` state on the first frame); auto-match-from-dock on first connect; `0xD1` byte-8 unit parsing with on-device-confirmed mapping; custom launcher icon + splash; edge-case states (BT off banner with Open Settings, permission-revoked-on-resume re-route to PermissionScreen, scan-empty hint with "Scan again", `DumbbellCard` "Disconnected" state for mid-session drops); new `BleScanner.adapterState` port surface backed by `FlutterBluePlus.adapterState`.
 
 ### 1i. Out of scope for MVP (deferred)
 
@@ -342,11 +341,11 @@ Pulling down from the main screen refreshes: re-fetches the weights of connected
 
 ## Recommended Order of Work
 
-**Phase 0 is complete; Phase 1 is one screen away; §2d Design v1 has landed.** End-to-end: set + read weight on N dumbbells via a single Home screen with promote-on-tap and per-card × remove, warm-start seeding, Settings/About with reactive unit toggle, auto-match-from-dock, dark M3 theme, large-font + tablet portability, custom icon + splash. Only edge-case screens (BT off, all out of range, mid-session drops) remain to finish Phase 1.
+**Phase 0 + Phase 1 are complete; §2c About + §2d Design v1 have landed.** End-to-end: set + read weight on N dumbbells via a single Home screen with promote-on-tap and per-card × remove, warm-start seeding, Settings/About with reactive unit toggle, auto-match-from-dock, dark M3 theme, large-font + tablet portability, custom icon + splash. Edge-case states (BT off, all out of range, mid-session drops, permission revoked mid-session) all have explicit UI. Remaining work is on-device verification + further Phase 2 polish.
 
 1. ✅ Phase 0 reverse-engineering (0a–0e done; 0f closed via static analysis — no HCI snoop needed)
-2. 🟡 Phase 1 — Flutter MVP — PRs merged: #1, #2, #3, #7, #8, #10, #14–#20; only edge-case screens (§1h) outstanding.
-3. 🟡 Phase 2 — UX and UI improvements. §2c About screen + §2d Design v1 shipped. Still pending: §2a (state-stream robustness), §2b (UX polish), §2e (rename dumbbells), §2f (per-device weight override).
+2. ✅ Phase 1 — Flutter MVP — PRs merged: #1, #2, #3, #7, #8, #10, #14–#20, plus the edge-case PR closing §1h.
+3. 🟡 Phase 2 — UX and UI improvements. §2c About screen + §2d Design v1 shipped. Still pending: §2a (state-stream robustness — reconnect-on-resume + drop-then-reconnect), §2b (UX polish), §2e (rename dumbbells), §2f (per-device weight override).
 4. ⏳ Phase 3 — Testing & distribution
 
 ---
@@ -357,7 +356,7 @@ Pulling down from the main screen refreshes: re-fetches the weights of connected
 
 - ✅ **Protocol correctness** — `0xD6 <idx>` sent from nRF Connect physically moves the dumbbell across all 8 indices on `DB200-0161997`.
 - ✅ **Protocol unit tests** — `test/protocol/checksum_test.dart` and `test/protocol/frame_test.dart` exercise the checksum algorithm and the frame builder/parser round-trip.
-- ✅ **State + group + widget + screen unit tests** — 146 tests total covering `state/{weights,preferences,unit_auto_matcher,permission_request_flow}`, `devices/{dumbbell,weight_group}` (incl. `GroupSnapshot` derivations + `remove()` race guard), `widgets/{weight_button,dumbbell_card,failed_device_card}` (incl. `TextScaler` 1.6× large-font safety + the optional `onRemove` affordance), `screens/{home,permission,settings,about}_screen` (warm-start seeding, promote-on-tap, retry, ×-remove, auto-match-from-dock, unit-toggle live re-label, consensus / motor-active, persisted-set). Includes the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
+- ✅ **State + group + widget + screen unit tests** — 152 tests total covering `state/{weights,preferences,unit_auto_matcher,permission_request_flow}`, `devices/{dumbbell,weight_group}` (incl. `GroupSnapshot` derivations + `remove()` race guard), `widgets/{weight_button,dumbbell_card,failed_device_card}` (incl. `TextScaler` 1.6× large-font safety + the optional `onRemove` affordance + the mid-session-drop "Disconnected" state), `screens/{home,permission,settings,about}_screen` (warm-start seeding, promote-on-tap, retry, ×-remove, auto-match-from-dock, unit-toggle live re-label, consensus / motor-active, persisted-set, BT-adapter-off banner, permission-revoked-on-resume re-route, scan-empty hint + Scan again). Includes the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
 - ✅ **Multi-device fan-out (architectural)** — `WeightGroup.setWeightIndex` fan-out covered by unit tests against a fake-Dumbbell.
 
 ### Pending — needs on-device verification (Android + iOS)
@@ -382,7 +381,11 @@ The unit + widget test suites cover the pure-Dart and Flutter-widget layers, but
 - **Auto-match dock unit (no prior Settings choice)**: with both docks on kg via the physical gesture, connect → "Unit set to kg to match your dumbbells." SnackBar, weight buttons re-label to `3.6 kg` … `22.7 kg`. Disconnect, flip one dock to lbs, reconnect → "Dumbbells are set to different units — pick one in Settings" SnackBar; app display unit unchanged.
 - **Auto-match no-op after explicit pick**: open Settings, tap the lbs/kg toggle (either side counts as explicit). Reconnect with any unit combination → no SnackBar, no preference change.
 - **Auto-match across post-connect race**: the post-connect battery read makes a dumbbell `isReady` before the `0xD1` reply arrives. The auto-match should *not* fire on the bare battery-ready state — it should wait for the unit byte and then fire. Easiest probe: clear app data, connect; the SnackBar should arrive within ~1.5s of "Connecting…" disappearing on the cards, not instantly.
-- Bluetooth turned off mid-session: cards grey out / re-enable: cards recover. (This is partially tracked under §1h "edge-case screens" but a pre-shipping spot-check is worth doing.)
+- **Edge-case spot-checks** (§1h):
+  - Bluetooth turned off mid-session: the error-coloured "Bluetooth is off" banner appears at the top of the Home body, the scan area copy switches to "Turn Bluetooth on to scan.", the Open Settings button takes you to the OS Bluetooth settings. Toggle BT back on → banner + copy disappear, scan resumes.
+  - All dumbbells out of range: after the 30 s scan timeout the bottom region shows "No JaxJox dumbbells found. Make sure they're powered on and in range." with a tonal Scan again button. Tap → scan restarts.
+  - Mid-session drop: power off a connected dumbbell — its card flips to an error-coloured "Disconnected" chip + body line (not "Connecting…"). Power it back on — it does not auto-reconnect yet (that's §2a); the user needs to ×-remove it and re-add it from the scan list.
+  - Permission revocation (Android): with HomeScreen visible, background the app, revoke "Nearby devices" in Settings.app, foreground it → HomeScreen pushes back to PermissionScreen automatically.
 
 #### iOS (verification platform)
 
