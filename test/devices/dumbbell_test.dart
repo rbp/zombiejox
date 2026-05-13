@@ -5,6 +5,8 @@ import 'package:zombiejox/ble/ble_connection_state.dart';
 import 'package:zombiejox/ble/ble_transport.dart';
 import 'package:zombiejox/ble/device_ref.dart';
 import 'package:zombiejox/devices/dumbbell.dart';
+import 'package:zombiejox/protocol/frame.dart';
+import 'package:zombiejox/protocol/opcodes.dart';
 
 /// In-memory [BleTransport] used by the proxy-replay test. Lets the
 /// test push connection-state events into a Dumbbell at controlled
@@ -18,6 +20,9 @@ class _FakeTransport implements BleTransport {
   final _conn = StreamController<BleConnectionState>.broadcast();
   final _rx = StreamController<List<int>>.broadcast();
 
+  /// Records every TX write — drives the §2g `refresh()` opcode test.
+  final List<List<int>> writes = [];
+
   @override
   Stream<BleConnectionState> get connectionState => _conn.stream;
 
@@ -26,11 +31,17 @@ class _FakeTransport implements BleTransport {
 
   void emitConn(BleConnectionState s) => _conn.add(s);
 
+  /// Push bytes through the RX channel as if the firmware had just
+  /// emitted them — drives `Dumbbell._onBytes` from the test side.
+  void emitRx(List<int> bytes) => _rx.add(bytes);
+
   @override
   Future<void> connect() async {/* no-op */}
 
   @override
-  Future<void> writeTx(List<int> bytes) async {/* no-op */}
+  Future<void> writeTx(List<int> bytes) async {
+    writes.add(List.unmodifiable(bytes));
+  }
 
   @override
   Future<int?> readBatteryLevel() async => null;
@@ -165,6 +176,76 @@ void main() {
           reason: 'post-disconnect subscriber must not hang forever');
 
       await sub1.cancel();
+    });
+  });
+
+  group('refresh (§2g pull-to-refresh)', () {
+    // A minimal `0xD1` reply built through the live frame builder so the
+    // test stays decoupled from the byte layout — `applyFrame` parses
+    // exactly six payload bytes and we hand it 0s for each. Drops
+    // through to `Dumbbell._onBytes` → state emit, which flips
+    // `isReady` true so `refresh()` doesn't short-circuit.
+    final readyReply = buildFrame(Opcodes.queryStatus, [0, 0, 0, 0, 0, 0]);
+
+    test('on a ready dumbbell: writes a queryStatus (0xD1) frame to TX',
+        () async {
+      late _FakeTransport transport;
+      final d = Dumbbell(
+        const DeviceRef(id: 'AA:01'),
+        transportFactory: (ref) => transport = _FakeTransport(ref),
+      );
+      await d.connect();
+      // `connect()` itself fires a queryStatus as part of the handshake.
+      // Drop the setup writes so the assertion below only sees the
+      // refresh write.
+      transport.writes.clear();
+      transport.emitRx(readyReply);
+      await pumpEventQueue();
+      expect(d.isReady, isTrue, reason: 'state frame arrived ⇒ ready');
+
+      await d.refresh();
+
+      expect(transport.writes, hasLength(1));
+      final parsed = parseFrame(transport.writes.single);
+      expect(parsed, isNotNull,
+          reason: 'refresh write must be a well-formed JaxJox frame');
+      expect(parsed!.opcode, Opcodes.queryStatus,
+          reason: 'refresh fires the 0xD1 queryStatus opcode');
+
+      await d.disconnect();
+    });
+
+    test('on a not-yet-ready dumbbell: no-op (no TX write)', () async {
+      late _FakeTransport transport;
+      final d = Dumbbell(
+        const DeviceRef(id: 'AA:01'),
+        transportFactory: (ref) => transport = _FakeTransport(ref),
+      );
+      // Skip connect entirely — isReady is false from construction.
+      transport.writes.clear();
+
+      await d.refresh();
+
+      expect(transport.writes, isEmpty,
+          reason: 'no write when isReady is false');
+    });
+
+    test('on a disposed dumbbell: no-op', () async {
+      late _FakeTransport transport;
+      final d = Dumbbell(
+        const DeviceRef(id: 'AA:01'),
+        transportFactory: (ref) => transport = _FakeTransport(ref),
+      );
+      await d.connect();
+      transport.emitRx(readyReply);
+      await pumpEventQueue();
+      await d.disconnect();
+      transport.writes.clear();
+
+      await d.refresh();
+
+      expect(transport.writes, isEmpty,
+          reason: 'disposed dumbbells must not write');
     });
   });
 }

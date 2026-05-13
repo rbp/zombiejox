@@ -369,6 +369,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// §2g pull-to-refresh. Re-queries every ready dumbbell for its
+  /// current state and restarts the BLE scan in parallel. Resolves once
+  /// both kicks have returned — at which point the [RefreshIndicator]
+  /// stops spinning. Fresh state frames and new scan results continue
+  /// to arrive asynchronously through their normal streams.
+  Future<void> _onRefresh() async {
+    await Future.wait<void>([
+      _group.refresh(),
+      _startScan(),
+    ]);
+  }
+
   Future<void> _onSelectIndex(int idx) async {
     // §2b: haptic confirms the tap registered before the BLE write
     // round-trips. The grid's `canPress` already gates on `anyReady`,
@@ -445,6 +457,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onRemove: _onRemove,
               onPromote: _onPromote,
               onToggleScan: _toggleScan,
+              onRefresh: _onRefresh,
               onOpenAppSettings: openAppSettings,
               onEnableBluetooth: _scanner.turnOnBluetooth,
             ),
@@ -479,6 +492,11 @@ class _Body extends StatelessWidget {
   final Future<void> Function(DeviceRef) onRemove;
   final void Function(DeviceRef) onPromote;
   final Future<void> Function(bool currentlyScanning) onToggleScan;
+
+  /// §2g pull-to-refresh. Re-queries connected dumbbells AND restarts
+  /// the BLE scan. The [RefreshIndicator] spins until this resolves.
+  final Future<void> Function() onRefresh;
+
   final Future<bool> Function() onOpenAppSettings;
   final Future<bool> Function() onEnableBluetooth;
 
@@ -494,6 +512,7 @@ class _Body extends StatelessWidget {
     required this.onRemove,
     required this.onPromote,
     required this.onToggleScan,
+    required this.onRefresh,
     required this.onOpenAppSettings,
     required this.onEnableBluetooth,
   });
@@ -582,15 +601,39 @@ class _Body extends StatelessWidget {
           // visual symmetry; on a tall phone two cards fit comfortably,
           // on a small phone (~140 dp top region) only one card fits
           // without scrolling — the ListView absorbs the rest.
+          //
+          // §2g: the region is wrapped in a RefreshIndicator so pulling
+          // down on the user's dumbbells fires `onRefresh` (re-query
+          // connected weights + restart scan). The inner scrollable uses
+          // `AlwaysScrollableScrollPhysics` so the gesture activates
+          // even when the content is short — and the empty hint is
+          // rendered through a `ListView` for the same reason.
           Expanded(
             flex: 2,
-            child: selectedDevices.isEmpty
-                ? const _TopEmptyHint()
-                : ListView.separated(
-                    itemCount: selectedCards.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (_, i) => selectedCards[i],
-                  ),
+            child: RefreshIndicator(
+              onRefresh: onRefresh,
+              child: selectedDevices.isEmpty
+                  // CustomScrollView + SliverFillRemaining so the empty
+                  // hint stays vertically centred in the region (matching
+                  // the pre-§2g layout) while still being scrollable —
+                  // RefreshIndicator's pull gesture needs a scrollable
+                  // child with `AlwaysScrollableScrollPhysics`.
+                  ? CustomScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      slivers: const [
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: _TopEmptyHint(),
+                        ),
+                      ],
+                    )
+                  : ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      itemCount: selectedCards.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (_, i) => selectedCards[i],
+                    ),
+            ),
           ),
           const SizedBox(height: 12),
           // MIDDLE — always-visible weight grid.

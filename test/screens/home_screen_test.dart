@@ -32,6 +32,7 @@ class _FakeDumbbell extends Dumbbell {
       StreamController<BleConnectionState>.broadcast();
   DumbbellState? _last;
   final List<int> setWeightCalls = [];
+  int refreshCallCount = 0;
   bool failSetWeight = false;
   bool failConnect = false;
   bool failReconnect = false;
@@ -74,6 +75,11 @@ class _FakeDumbbell extends Dumbbell {
       batteryPct: _last?.batteryPct,
     );
     _states.add(_last!);
+  }
+
+  @override
+  Future<void> refresh() async {
+    refreshCallCount++;
   }
 
   @override
@@ -138,17 +144,25 @@ class _FakeScanner implements BleScanner {
     yield* _adapterStateController.stream;
   }
 
+  /// Per-call counters — let the §2g pull-to-refresh test assert that
+  /// the BLE scan was re-kicked (stop, then start) when the gesture
+  /// fires, distinct from the initial bootstrap.
+  int startScanCallCount = 0;
+  int stopScanCallCount = 0;
+
   @override
   Future<void> startScan({
     List<String> withKeywords = const [],
     Duration? timeout,
   }) async {
+    startScanCallCount++;
     _scanning = true;
     _isScanning.add(true);
   }
 
   @override
   Future<void> stopScan() async {
+    stopScanCallCount++;
     _scanning = false;
     _isScanning.add(false);
   }
@@ -1040,6 +1054,77 @@ void main() {
       expect(find.byType(PermissionScreen), findsOneWidget);
       expect(fakes.single.reconnectCallCount, beforeResume,
           reason: 'revoked permissions ⇒ no extra reconnect attempts');
+    });
+  });
+
+  group('pull-to-refresh (§2g)', () {
+    testWidgets(
+        'pull down on the top region fires WeightGroup.refresh on every '
+        'ready member AND restarts the BLE scan', (tester) async {
+      final prefs = await _freshPrefs(remembered: ['AA:01', 'AA:02']);
+      final ctx = await _pumpHome(tester, prefs: prefs);
+      // Bring both members ready so the refresh fan-out reaches them.
+      for (final f in ctx.fakes) {
+        f.emitState(
+          const DumbbellState(
+              weightIndex: 0, motorActive: false, batteryPct: 80),
+        );
+      }
+      await tester.pumpAndSettle();
+      // Snapshot the pre-refresh counters — bootstrap already called
+      // startScan once.
+      final startsBefore = ctx.scanner.startScanCallCount;
+      final stopsBefore = ctx.scanner.stopScanCallCount;
+      for (final f in ctx.fakes) {
+        expect(f.refreshCallCount, 0, reason: 'no refresh yet');
+      }
+
+      // Drag down on the top region's scrollable — RefreshIndicator's
+      // canonical fling-with-velocity gesture. `fling` rather than
+      // `drag` so the indicator's velocity threshold is met
+      // deterministically.
+      await tester.fling(
+        find.byType(DumbbellCard).first,
+        const Offset(0, 400),
+        1000,
+      );
+      // RefreshIndicator spins until the onRefresh future resolves;
+      // settle the animation + microtasks fully so the assertions see
+      // the post-callback state.
+      await tester.pumpAndSettle();
+
+      for (final f in ctx.fakes) {
+        expect(f.refreshCallCount, 1,
+            reason: 'every ready dumbbell receives one refresh fan-out');
+      }
+      // Scan restarted: stopScan was called (we were already scanning),
+      // then startScan was called again.
+      expect(ctx.scanner.stopScanCallCount, stopsBefore + 1,
+          reason: 'in-flight scan stopped before restart');
+      expect(ctx.scanner.startScanCallCount, startsBefore + 1,
+          reason: 'scan re-kicked after the stop');
+    });
+
+    testWidgets(
+        'pull down with no selected devices still works — empty hint is '
+        'wrapped in a scrollable so the gesture activates', (tester) async {
+      final prefs = await _freshPrefs();
+      final ctx = await _pumpHome(tester, prefs: prefs);
+      // Empty selection ⇒ "Tap a dumbbell below to connect" hint is the
+      // only thing in the top region. The RefreshIndicator still needs
+      // to spin from here so the user can refresh the scan list.
+      expect(find.text('Tap a dumbbell below to connect'), findsOneWidget);
+      final startsBefore = ctx.scanner.startScanCallCount;
+
+      await tester.fling(
+        find.text('Tap a dumbbell below to connect'),
+        const Offset(0, 400),
+        1000,
+      );
+      await tester.pumpAndSettle();
+
+      expect(ctx.scanner.startScanCallCount, startsBefore + 1,
+          reason: 'empty-state pull still restarts the scan');
     });
   });
 }

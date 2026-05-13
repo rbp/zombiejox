@@ -396,6 +396,29 @@ class WeightGroup {
     return Future.wait([for (final d in ready) d.setWeightIndex(index)]);
   }
 
+  /// Re-query every ready member (§2g pull-to-refresh). Members that
+  /// haven't reached `isReady` are skipped — same defence-in-depth as
+  /// [setWeightIndex] (a write before TX is initialised would throw).
+  /// Members mid-reconnect are filtered out the same way:
+  /// [Dumbbell.handleTransportDrop] clears `lastState` so `isReady`
+  /// returns false until the new connection emits its first state frame.
+  ///
+  /// Returns when every ready member's write completes. Failures don't
+  /// short-circuit (`eagerError: false`): one flaky member shouldn't
+  /// suppress the others' refresh. No-op on a disposed group.
+  Future<void> refresh() {
+    if (_disposed) return Future.value();
+    final ready = [
+      for (final d in _dumbbells)
+        if (d.isReady) d
+    ];
+    if (ready.isEmpty) return Future.value();
+    return Future.wait(
+      [for (final d in ready) d.refresh()],
+      eagerError: false,
+    );
+  }
+
   /// Fast-forward any pending reconnect timers so they fire immediately.
   /// Called from `HomeScreen.didChangeAppLifecycleState` on resume so
   /// the user doesn't sit through a 60s wait after un-backgrounding the

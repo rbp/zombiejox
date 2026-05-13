@@ -217,6 +217,20 @@ class Dumbbell {
     return _ble.writeTx(buildFrame(Opcodes.setWeight, [index]));
   }
 
+  /// Re-query the dumbbell's current state. Sends `0xD1 queryStatus`; the
+  /// firmware replies with a fresh `0xD1` (or an interleaved `0xD2`) on
+  /// the existing RX subscription, which lands in [_onBytes] and emits
+  /// via [states] like any other state frame.
+  ///
+  /// Drives the pull-to-refresh path (§2g). No-op on a disposed or
+  /// not-yet-ready dumbbell — gating on [isReady] mirrors
+  /// [setWeightIndex] and avoids a `StateError` from the underlying
+  /// transport whose TX characteristic isn't initialised yet.
+  Future<void> refresh() {
+    if (_disposed || !isReady) return Future.value();
+    return _ble.writeTx(buildFrame(Opcodes.queryStatus, const []));
+  }
+
   /// Called by the owning [WeightGroup] when the underlying transport
   /// reports a `disconnected` event after this dumbbell has previously
   /// been ready — i.e. a mid-session drop, not a graceful close.
