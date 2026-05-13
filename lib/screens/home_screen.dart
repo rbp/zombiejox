@@ -179,11 +179,18 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Feed the auto-matcher the current snapshot. `failedCount` /
-  /// `attemptedCount` are the snapshot-derived values; the screen-level
-  /// "user's intent" is `_selectedDevices.length` since failed and
-  /// connecting devices both live there.
+  /// Feed the auto-matcher the current snapshot. `attemptedCount`
+  /// reflects the user's intent for the active session — failed and
+  /// connecting devices both live in `_selectedDevices`.
+  ///
+  /// **Bail when `_selectedDevices` is empty** so the intermediate
+  /// snapshots emitted during "Disconnect all" (cleared selected list
+  /// + still-non-empty knownUnitCount on the in-flight snapshots from
+  /// `WeightGroup.remove`) don't trick the matcher into deciding
+  /// `0 + 0 >= 0` "all accounted for" and firing a spurious "Unit set
+  /// to X" SnackBar against an abandoned session.
   void _tickAutoMatcher() {
+    if (_selectedDevices.isEmpty) return;
     _autoMatcher.tick((
       knownUnits: _snapshot.knownUnits,
       knownUnitCount: _snapshot.knownUnitCount,
@@ -452,16 +459,18 @@ class _Body extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // TOP — selected devices. Min height ~= 2 cards so the layout
-          // doesn't jump when the first card arrives. ListView so >2
+          // TOP — selected devices. Bounded share of the Column so 3+
           // cards scroll within the region instead of pushing the grid
-          // down.
-          ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 168),
+          // / scan list off-screen. The flex share is the same as the
+          // bottom region so the layout reads symmetrically; on every
+          // phone we've measured the resulting height covers ≥ 2 cards,
+          // satisfying the "layout doesn't jump when the first card
+          // arrives" requirement.
+          Expanded(
+            flex: 2,
             child: selectedDevices.isEmpty
                 ? const _TopEmptyHint()
                 : ListView.separated(
-                    shrinkWrap: true,
                     itemCount: selectedCards.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (_, i) => selectedCards[i],
@@ -506,7 +515,6 @@ class _Body extends StatelessWidget {
                     .toList();
                 return _ScanResults(
                   results: results,
-                  unit: unit,
                   onPromote: onPromote,
                 );
               },
@@ -637,12 +645,10 @@ class ScanResultCard extends StatelessWidget {
 
 class _ScanResults extends StatelessWidget {
   final List<ScanHit> results;
-  final WeightUnit unit;
   final void Function(DeviceRef) onPromote;
 
   const _ScanResults({
     required this.results,
-    required this.unit,
     required this.onPromote,
   });
 
