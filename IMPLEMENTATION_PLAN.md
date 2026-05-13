@@ -347,6 +347,8 @@ Pulling down from the main screen refreshes: re-fetches the weights of connected
 - Test connection reliability, reconnect-on-resume, weight change responsiveness
 - Test with N dumbbells simultaneously (start with the user's pair)
 
+- Write a TESTING.md guide for testing. There should be a short session showing which commands to call for running automated tests, and a thorough but succint "Manual testing" session, with complete instructions for each platform.
+
 ### 3b. Build & distribute
 - Android: build APK/AAB, distribute via GitHub releases (sideload — Google Play won't host hobby apps for orphaned hardware)
 - iOS: TestFlight for personal use, or App Store submission
