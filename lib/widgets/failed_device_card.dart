@@ -87,18 +87,21 @@ class FailedDeviceCard extends StatelessWidget {
             // is fixed-width and may truncate on narrow phones. Keyed
             // so widget tests can target the tap region directly.
             //
-            // 48-dp Center wrapper to bring the hit target up to the
-            // Material minimum without enlarging the visual chip.
-            // Mirrors the same wrapper on [DumbbellCard].
+            // Vertical Padding bumps the GestureDetector's opaque hit
+            // area to the Material 48 dp minimum without enlarging
+            // the visual chip. NOT `SizedBox + Center` — the chip's
+            // private [_StatusChip] uses `alignment: Alignment.center`
+            // with no explicit height, which would make it expand to
+            // fill any tall parent and the `borderRadius: 999` would
+            // round it into a near-circle. Mirrors the same wrapper
+            // on [DumbbellCard].
             GestureDetector(
               key: const ValueKey('status-chip-tap'),
               behavior: HitTestBehavior.opaque,
               onTap: () => _handleStatusTap(context),
-              child: SizedBox(
-                height: 48,
-                child: Center(
-                  child: _StatusChip(label: 'Failed', color: errorColor),
-                ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                child: _StatusChip(label: 'Failed', color: errorColor),
               ),
             ),
             const SizedBox(width: 12),

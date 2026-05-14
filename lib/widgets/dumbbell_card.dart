@@ -260,20 +260,24 @@ class _Card extends StatelessWidget {
             // (chip *label* depends on a still-pending state stream).
             //
             // The chip itself renders at ~22 dp tall — well under the
-            // Material 48 dp minimum touch target. Wrap the chip in a
-            // 48-dp-tall, chip-width SizedBox + Center so the hit
-            // area meets the guideline while the chip's visual size
-            // stays unchanged. The row already hits 48 dp (the × icon
-            // button), so this doesn't grow the card.
+            // Material 48 dp minimum touch target. Pad above and
+            // below so the GestureDetector's opaque hit area covers
+            // the full 48 dp band. NOT `SizedBox(height: 48) + Center`:
+            // the chip's [_StatusChip] is an `AnimatedContainer` with
+            // `alignment: Alignment.center` and no explicit height,
+            // which makes it expand to fill its parent's incoming
+            // constraints. Inside a 48-dp `Center`, the chip would
+            // grow to 48×64 — and `borderRadius: 999` would render
+            // that near-square as a circle instead of an oblong pill.
+            // Padding doesn't constrain the chip, so its visual
+            // height stays at the intrinsic ~22 dp.
             GestureDetector(
               key: const ValueKey('status-chip-tap'),
               behavior: HitTestBehavior.opaque,
               onTap: () => _handleStatusTap(context, statusLabel),
-              child: SizedBox(
-                height: 48,
-                child: Center(
-                  child: _StatusChip(label: statusLabel, color: statusColor),
-                ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                child: _StatusChip(label: statusLabel, color: statusColor),
               ),
             ),
             const SizedBox(width: 12),
