@@ -98,6 +98,37 @@ class SelectionModel extends ChangeNotifier {
     return null;
   }
 
+  /// Just the user-set custom name for [device], or `null` if the user
+  /// hasn't renamed it (or has cleared the rename). Distinct from
+  /// [displayNameFor], which always returns a non-null user-facing
+  /// string by falling back to the advertised name / id.
+  ///
+  /// Used by the §2h status-pill toast on the cards: the toast only
+  /// includes "(name)" when the user has explicitly named the
+  /// dumbbell, never the advertised name (which is duplicated info
+  /// next to the device id).
+  ///
+  /// For a device IN the selection, the in-memory entry is the
+  /// authoritative answer — including when the user has just cleared
+  /// the rename (`customName == null`). We do *not* fall back to the
+  /// prefs map in that case, otherwise a stale persisted value (or a
+  /// failed write) would let the toast keep annotating with the old
+  /// name even though the user just wiped it.
+  ///
+  /// For a device NOT in the selection (e.g. it appears only in the
+  /// bottom scan list, or hasn't been promoted yet on a fresh launch),
+  /// fall back to [Preferences.customDeviceNames] so a previously-
+  /// renamed dumbbell still reports the user's name.
+  String? customNameFor(DeviceRef device) {
+    final entry = entryFor(device);
+    final String? raw = entry != null
+        ? entry.customName
+        : _preferences.customDeviceNames[device.id];
+    final trimmed = raw?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    return trimmed;
+  }
+
   /// Display name for a device — custom if the user has renamed it,
   /// else the device's advertised name / id.
   ///

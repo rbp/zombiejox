@@ -110,65 +110,66 @@ class _PermissionScreenState extends State<PermissionScreen> {
             child: Padding(
               padding: const EdgeInsets.all(32),
               child: ValueListenableBuilder<PermissionFlowState>(
-            valueListenable: _flow.state,
-            builder: (context, state, _) {
-              final denied = state == PermissionFlowState.denied;
-              final requesting = state == PermissionFlowState.requesting;
-              return Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Icon(
-                    Icons.bluetooth,
-                    size: 72,
-                    color: theme.colorScheme.primary,
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'ZombieJox needs Bluetooth',
-                    style: theme.textTheme.headlineMedium,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    denied
-                        ? 'Permission was denied. ZombieJox can\'t talk to your '
-                            'JaxJox dumbbells without Bluetooth access. You can '
-                            'grant it in your phone\'s settings.'
-                        : 'ZombieJox uses Bluetooth to talk to your JaxJox '
-                            'dumbbells. No data leaves your phone — no cloud, no '
-                            'account, no telemetry.',
-                    style: theme.textTheme.bodyLarge,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 32),
-                  if (denied) ...[
-                    FilledButton(
-                      onPressed: _openSettings,
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Text('Open Settings'),
+                valueListenable: _flow.state,
+                builder: (context, state, _) {
+                  final denied = state == PermissionFlowState.denied;
+                  final requesting = state == PermissionFlowState.requesting;
+                  return Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Icon(
+                        Icons.bluetooth,
+                        size: 72,
+                        color: theme.colorScheme.primary,
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    OutlinedButton(
-                      onPressed: _flow.tryAgain,
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Text('Try again'),
+                      const SizedBox(height: 24),
+                      Text(
+                        'ZombieJox needs Bluetooth',
+                        style: theme.textTheme.headlineMedium,
+                        textAlign: TextAlign.center,
                       ),
-                    ),
-                  ] else
-                    FilledButton(
-                      onPressed: requesting ? null : _onContinue,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Text(requesting ? 'Requesting…' : 'Continue'),
+                      const SizedBox(height: 16),
+                      Text(
+                        denied
+                            ? 'Permission was denied. ZombieJox can\'t talk to your '
+                                'JaxJox dumbbells without Bluetooth access. You can '
+                                'grant it in your phone\'s settings.'
+                            : 'ZombieJox uses Bluetooth to talk to your JaxJox '
+                                'dumbbells. No data leaves your phone — no cloud, no '
+                                'account, no telemetry.',
+                        style: theme.textTheme.bodyLarge,
+                        textAlign: TextAlign.center,
                       ),
-                    ),
-                ],
-              );
-            },
+                      const SizedBox(height: 32),
+                      if (denied) ...[
+                        FilledButton(
+                          onPressed: _openSettings,
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            child: Text('Open Settings'),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton(
+                          onPressed: _flow.tryAgain,
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            child: Text('Try again'),
+                          ),
+                        ),
+                      ] else
+                        FilledButton(
+                          onPressed: requesting ? null : _onContinue,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            child:
+                                Text(requesting ? 'Requesting…' : 'Continue'),
+                          ),
+                        ),
+                    ],
+                  );
+                },
               ),
             ),
           ),

@@ -38,7 +38,8 @@ void main() {
       expect(formatWeight(7, WeightUnit.kg), '22.7 kg');
     });
 
-    test('kg whole-number value renders without `.0` (matches dock display)', () {
+    test('kg whole-number value renders without `.0` (matches dock display)',
+        () {
       // Index 6 in kg mode shows as `20` on the dock, not `20.0`.
       expect(formatWeight(6, WeightUnit.kg), '20 kg');
     });

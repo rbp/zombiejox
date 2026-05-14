@@ -35,11 +35,9 @@ void main() {
     });
 
     test('seeds from rememberedDeviceIds in order', () async {
-      final prefs =
-          await _prefs(remembered: ['AA:01', 'AA:02', 'AA:03']);
+      final prefs = await _prefs(remembered: ['AA:01', 'AA:02', 'AA:03']);
       final model = SelectionModel(preferences: prefs);
-      expect(model.devices.map((d) => d.id),
-          ['AA:01', 'AA:02', 'AA:03']);
+      expect(model.devices.map((d) => d.id), ['AA:01', 'AA:02', 'AA:03']);
     });
 
     test('seeds custom names alongside remembered ids', () async {
@@ -192,8 +190,7 @@ void main() {
   group('persistence', () {
     test(
         'rememberedDeviceIds is NOT persisted until markVerified — a '
-        'connect that never reaches ready cannot poison warm-start',
-        () async {
+        'connect that never reaches ready cannot poison warm-start', () async {
       final prefs = await _prefs();
       final model = SelectionModel(preferences: prefs);
       model
@@ -266,19 +263,17 @@ void main() {
   });
 
   group('displayName fallbacks', () {
-    test(
-        'devices not in the selection fall back to DeviceRef.displayName',
+    test('devices not in the selection fall back to DeviceRef.displayName',
         () async {
       final prefs = await _prefs();
       final model = SelectionModel(preferences: prefs);
-      expect(model.displayNameFor(_device('AA:01', name: 'DB200-01')),
-          'DB200-01');
+      expect(
+          model.displayNameFor(_device('AA:01', name: 'DB200-01')), 'DB200-01');
     });
 
     test(
         'a non-selected device with a saved custom name returns the '
-        'custom name (so scan-list rows still reflect a rename)',
-        () async {
+        'custom name (so scan-list rows still reflect a rename)', () async {
       final prefs = await _prefs(customNames: {'AA:99': 'Old Faithful'});
       final model = SelectionModel(preferences: prefs);
       expect(model.contains(_device('AA:99')), isFalse);
@@ -305,6 +300,73 @@ void main() {
             customName: '   ',
           ).displayName,
           'advertised');
+    });
+  });
+
+  group('customNameFor (§2h)', () {
+    test('returns null when the user has not renamed', () async {
+      final prefs = await _prefs(remembered: ['AA:01']);
+      final model = SelectionModel(preferences: prefs);
+      expect(model.customNameFor(_device('AA:01')), isNull,
+          reason: 'no rename ⇒ no annotation in the §2h toast');
+    });
+
+    test('returns the user-set name for a selected device', () async {
+      final prefs = await _prefs(
+        remembered: ['AA:01'],
+        customNames: {'AA:01': 'Left'},
+      );
+      final model = SelectionModel(preferences: prefs);
+      expect(model.customNameFor(_device('AA:01')), 'Left');
+    });
+
+    test(
+        'returns the user-set name for a non-selected device too — the '
+        'toast on a re-promoted dumbbell should still annotate', () async {
+      final prefs = await _prefs(customNames: {'AA:99': 'Old Faithful'});
+      final model = SelectionModel(preferences: prefs);
+      expect(model.contains(_device('AA:99')), isFalse);
+      expect(model.customNameFor(_device('AA:99')), 'Old Faithful');
+    });
+
+    test(
+        'whitespace-only custom name returns null — falls back to "no '
+        r'annotation" rather than rendering "Device $id ( ) is …"', () async {
+      final prefs = await _prefs(customNames: {'AA:01': '   '});
+      final model = SelectionModel(preferences: prefs);
+      expect(model.customNameFor(_device('AA:01')), isNull);
+    });
+
+    test('a cleared custom name returns null after rename(null)', () async {
+      final prefs = await _prefs(
+        remembered: ['AA:01'],
+        customNames: {'AA:01': 'Left'},
+      );
+      final model = SelectionModel(preferences: prefs);
+      expect(model.customNameFor(_device('AA:01')), 'Left');
+      model.rename(_device('AA:01'), null);
+      expect(model.customNameFor(_device('AA:01')), isNull);
+    });
+
+    test(
+        'selected entry with null customName is authoritative — does NOT '
+        'fall back to a stale value in Preferences.customDeviceNames '
+        '(Copilot review on PR #28: a failed write or write race must '
+        'not let the toast keep the old name)', () async {
+      // Arrange: device is selected with no custom name in memory.
+      final prefs = await _prefs(remembered: ['AA:01']);
+      final model = SelectionModel(preferences: prefs);
+      expect(model.customNameFor(_device('AA:01')), isNull);
+
+      // Simulate prefs drifting out of sync with the in-memory entry —
+      // the on-disk map says 'Stale' but the selected entry was never
+      // renamed in this session.
+      await prefs.setCustomDeviceNames({'AA:01': 'Stale'});
+
+      // The in-memory entry must win for selected devices.
+      expect(model.customNameFor(_device('AA:01')), isNull,
+          reason: 'selected entry is authoritative — prefs fallback only '
+              'applies to devices NOT in the selection');
     });
   });
 }

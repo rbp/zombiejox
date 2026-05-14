@@ -144,19 +144,20 @@ lib/
                                         scan_screen.dart and control_screen.dart deleted in PR #20.
   widgets/
     weight_button.dart              ✅   PR #19: rounded tile with FittedBox(scaleDown) for large-font safety
-    dumbbell_card.dart              ✅   PR #19: rounded surface + status chip. PR #20: optional onRemove. PR §2a: optional `retryState` prop → "Reconnecting…" chip
-    failed_device_card.dart         ✅   shown when a device's connect throws; refresh + optional × icons
+    dumbbell_card.dart              ✅   PR #19: rounded surface + status chip. PR #20: optional onRemove. PR §2a: optional `retryState` prop → "Reconnecting…" chip. PR §2h: chip is tappable (keyed `status-chip-tap`) → centered toast with "Device $id ($customName) is $state"
+    failed_device_card.dart         ✅   shown when a device's connect throws; refresh + optional × icons. PR §2h: chip tappable → "Device $id ($customName) is Failed" toast
+    status_toast.dart               ✅   PR §2h: centered fade-in/hold/fade-out toast via OverlayEntry; IgnorePointer so it doesn't block taps below
 test/
   protocol/                         ✅   checksum_test, frame_test (incl. 0xD1 unit-byte parse)
   state/                            ✅   weights_test (incl. weightUnitFromRawByte), preferences_test, permission_request_flow_test, unit_auto_matcher_test
   devices/                          ✅   dumbbell_test, weight_group_test (incl. GroupSnapshot derivations + remove() race guard)
-  widgets/                          ✅   weight_button_test (incl. TextScaler 1.6× large-font safety), dumbbell_card_test, failed_device_card_test
-  screens/                          ✅   home_screen_test (warm-start, promote-on-tap, retry, ×-remove, auto-match, unit toggle live re-label, consensus, motor-active, persisted-set), permission_screen_test, settings_screen_test, about_screen_test
+  widgets/                          ✅   weight_button_test (incl. TextScaler 1.6× large-font safety), dumbbell_card_test (incl. §2h status-pill toast), failed_device_card_test (incl. §2h), status_toast_test (fade-in / auto-dismiss / non-blocking)
+  screens/                          ✅   home_screen_test (warm-start, promote-on-tap, retry, ×-remove, auto-match, unit toggle live re-label, consensus, motor-active, persisted-set, §2h chip-tap wireup), permission_screen_test, settings_screen_test, about_screen_test
 android/app/src/main/AndroidManifest.xml   ✅
 ios/Runner/Info.plist                       ✅
 ```
 
-Total test count: **190 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
+Total test count: **246 tests, all passing.** `flutter analyze` clean. `dart format` clean. All tests above `lib/ble/` use the port types — no test imports `package:flutter_blue_plus/` outside the adapter.
 
 ### 1e. Platform setup — ✅ done
 
@@ -221,7 +222,7 @@ Edge-case states (§1h):
 
 Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case hardening, and visual polish. Not a separate implementation pass — incremental work on top of Phase 1.
 
-Shipped so far: §2a (state-stream robustness — auto-reconnect on drop + resume kick), §2b (UX polish — animations + haptic + reconnect-failure SnackBar + activity glyph), §2c (About screen restructure), §2d (Design v1), §2e (rename dumbbells — `SelectionModel` extracted in same PR), §2g (pull-down to refresh — `Dumbbell.refresh` + `WeightGroup.refresh` + top-region `RefreshIndicator`). Outstanding: §2f (per-device weight override).
+Shipped so far: §2a (state-stream robustness — auto-reconnect on drop + resume kick), §2b (UX polish — animations + haptic + reconnect-failure SnackBar + activity glyph), §2c (About screen restructure), §2d (Design v1), §2e (rename dumbbells — `SelectionModel` extracted in same PR), §2g (pull-down to refresh — `Dumbbell.refresh` + `WeightGroup.refresh` + top-region `RefreshIndicator`), §2h (tappable status pill → centered toast). Outstanding: §2f (per-device weight override).
 
 ### ADR-001 — four sources of truth in the running app
 
@@ -236,7 +237,7 @@ Recorded post-Phase-1 multi-agent code review (Round 2). The app keeps four stat
 
 - The `BleTransport` port is now bound by `Dumbbell`'s constructor *with* a test seam: `Dumbbell(this.device, {BleTransport Function(DeviceRef)? transportFactory})`. §2a's reconnect path swaps `_ble` internally for a fresh transport (`_transportFactory(device)`) after a drop, so `_ble` is non-final. The seam was originally deferred per the "no second transport yet" rule, but §2a's `connectionState` proxy (latest-state cache + per-listener `Stream.multi`) needs end-to-end testability that the subclass-and-override pattern can't provide — the proxy logic lives inside `Dumbbell` itself, not in any method a subclass overrides. The pre-existing `FakeDumbbell` (subclass + override) pattern remains the right choice when the test doesn't care about the proxy's internals.
 - `DumbbellCard` currently subscribes to (1) and (2) separately and re-derives connection / motor labels. This is the one remaining place where a screen-side widget computes derived state that could live on (3). §2a added a `retryState: RetryState?` prop wired from `GroupSnapshot.retryStates[device]` — that's one more piece of derived state pushed onto the snapshot, but the card still owns the `connState`/`state` subscriptions. The intended fix is to extend `GroupSnapshot` with a per-`DeviceRef` view-model so the card becomes a pure `Stateless` projection over a single value object. Tracked as Phase 2 cleanup.
-- (Historical, resolved in §2e:) Adding "rename" or "per-device weight override" without first extracting (4) into `lib/state/` would push `HomeScreen` past the junction-box threshold. §2e extracted `SelectionModel`; §2f's per-device weight override now lands on top of the same model.
+- (Historical, resolved in §2e:) Adding "rename" or "per-device weight override" without first extracting (4) into `lib/state/` would push `HomeScreen` past the junction-box threshold. §2e extracted `SelectionModel`; §2f's per-device weight override now lands on top of the same model. §2h's `SelectionModel.customNameFor` is a thin read-side accessor over the same data.
 
 ### 2a. State-stream robustness — ✅ done
 
@@ -359,11 +360,18 @@ Shipped in one PR.
 - **Empty-state pull works.** When the selection is empty the top region renders the "Tap a dumbbell below to connect" hint inside a `CustomScrollView` + `SliverFillRemaining` so it stays vertically centred AND the pull gesture still activates (the user can refresh the scan list from a cold start without first promoting anything).
 - **`AlwaysScrollableScrollPhysics`** on the inner ListView/CustomScrollView so the gesture activates even when the content is short enough not to overflow.
 
-### 2h. Tapping the bluetooth status pill
+### 2h. Tapping the bluetooth status pill — ✅ done
 
-The bluetooth status pill may be truncated (e.g., "Conne..."). If the user taps that side of the dumbbell card, the app should display a message for a few seconds, saying "Device $UUID ($displayName) is $state" where ($displayName) is only shown if the user has set a specific name (see 2f), do not show the UUID again.
+Shipped in one PR.
 
-The message could be a snackbar, but preferably something that flashes for a second or two in the middle of the screen. More like the old "Toast" standard.
+**What works:**
+
+- **Tappable chip on every card.** Both `DumbbellCard` and `FailedDeviceCard` wrap their `_StatusChip` in a `GestureDetector` (`HitTestBehavior.opaque` so the chip's padding picks up taps too, not just the rendered pill). The chip is fixed-width at 64 dp and may truncate to `"Conne…"`; a tap on the chip surfaces the full state without the user having to guess.
+- **Toast widget, not SnackBar.** `lib/widgets/status_toast.dart` exposes `showStatusToast(BuildContext, String)`, which inserts an `OverlayEntry` containing a centered `Material` pill that fades in over 200 ms, holds for 1.6 s at full opacity, then fades out over 200 ms and removes itself. The whole lifecycle is one `AnimationController` driving a three-stage `TweenSequence` (fade-in → constant 1.0 → fade-out) — rather than a `Timer`-based hold — because a `Timer` scheduled inside an animation status listener never fires under `tester.pump()` in the Flutter test framework. Wrapped in `IgnorePointer` so the toast doesn't block taps on the cards / weight grid beneath it. Centered rather than bottom-anchored (SnackBar) per the spec — feels closer to the old Android `Toast` UX, and doesn't push the layout around.
+- **Accessibility.** The message is wrapped in `Semantics(container: true, liveRegion: true, ...)` so screen readers announce the toast on appearance — without it, AT users tap the chip and get no audible response before the toast auto-dismisses. Both card chips also get a 48 dp Material-minimum touch target via `Padding(symmetric vertical: 13)` inside the `GestureDetector` (with `behavior: HitTestBehavior.opaque`). NOT `SizedBox(height: 48) → Center` — the chip's `_StatusChip` has `alignment: Alignment.center` with no explicit height, so a tall `Center` wrapper makes it expand to fill, and `borderRadius: 999` rounds the resulting near-square into a circle. Padding doesn't constrain the chip, so the visible 64×22 oblong pill is preserved while the hit area still hits 48 dp.
+- **Message format.** `Device $id is $state` when the user has not renamed the dumbbell; `Device $id ($customName) is $state` when they have. The annotation uses the user-set custom name only (from `SelectionModel.customNameFor`) — never the advertised name, since the id already disambiguates and an advertised-name fallback would just duplicate information the user can read off the device label region. `$state` reflects the chip's current label: Connecting / Connected / Moving / Reconnecting / Disconnected / Failed.
+- **`SelectionModel.customNameFor(DeviceRef)`.** New accessor returning the user-set name (trimmed, null when absent or whitespace-only). Distinct from `displayNameFor`, which always returns a non-null fallback. For a device IN the selection, the in-memory entry is authoritative — including when the user has just cleared the rename — so a stale or partially-written `Preferences.customDeviceNames` value cannot let the toast keep the old name. For a device NOT in the selection (scan list, pre-promote), falls back to `Preferences.customDeviceNames` so a previously-renamed dumbbell still annotates.
+- **Tap target keyed for tests.** Both cards stamp `ValueKey('status-chip-tap')` on the `GestureDetector`. The chip *label* is wrapped in an `AnimatedSwitcher` driven by the connection-state stream, which makes it timing-dependent in widget tests (the fake `Dumbbell`'s broadcast stream emits `connected` before the card's `StreamBuilder` subscribes). The key lets tests tap the chip's tap region directly without depending on the still-pending label.
 
 
 ### ~~kg/lbs unit toggle on the dock~~ — confirmed impossible
@@ -405,7 +413,7 @@ The message could be a snackbar, but preferably something that flashes for a sec
 
 1. ✅ Phase 0 reverse-engineering (0a–0e done; 0f closed via static analysis — no HCI snoop needed)
 2. ✅ Phase 1 — Flutter MVP — PRs merged: #1, #2, #3, #7, #8, #10, #14–#20, plus the edge-case PR closing §1h.
-3. 🟡 Phase 2 — UX and UI improvements. §2a (state-stream robustness — auto-reconnect on drop + resume kick) + §2b (UX polish — animations + haptic + reconnect SnackBar) + §2c (About screen) + §2d (Design v1) + §2e (rename dumbbells) + §2g (pull-down to refresh) shipped. Still pending: §2f (per-device weight override).
+3. 🟡 Phase 2 — UX and UI improvements. §2a (state-stream robustness — auto-reconnect on drop + resume kick) + §2b (UX polish — animations + haptic + reconnect SnackBar) + §2c (About screen) + §2d (Design v1) + §2e (rename dumbbells) + §2g (pull-down to refresh) + §2h (tappable status pill → toast) shipped. Still pending: §2f (per-device weight override).
 4. ⏳ Phase 3 — Testing & distribution
 
 ---
@@ -416,7 +424,7 @@ The message could be a snackbar, but preferably something that flashes for a sec
 
 - ✅ **Protocol correctness** — `0xD6 <idx>` sent from nRF Connect physically moves the dumbbell across all 8 indices on `DB200-0161997`.
 - ✅ **Protocol unit tests** — `test/protocol/checksum_test.dart` and `test/protocol/frame_test.dart` exercise the checksum algorithm and the frame builder/parser round-trip.
-- ✅ **State + group + widget + screen unit tests** — 190 tests total covering `state/{weights,preferences,unit_auto_matcher,permission_request_flow}`, `devices/{dumbbell,weight_group}` (incl. `GroupSnapshot` derivations + `remove()` race guard + §2a reconnect supervisor: trigger conditions, backoff schedule via `fake_async`, `remove()`-mid-`waiting`, `remove()`-mid-`attempting`, `disconnectAll()` cancel, `kickReconnectsForResume`, in-flight protection, `setWeightIndex` skips reconnecting members), `widgets/{weight_button,dumbbell_card,failed_device_card}` (incl. `TextScaler` 1.6× large-font safety + the optional `onRemove` affordance + the mid-session-drop "Disconnected" state + the §2a "Reconnecting…" state via `retryState` prop), `screens/{home,permission,settings,about}_screen` (warm-start seeding, promote-on-tap, retry, ×-remove, auto-match-from-dock, unit-toggle live re-label, consensus / motor-active, persisted-set, BT-adapter-off banner, permission-revoked-on-resume re-route, scan-empty hint + Scan again, §2a mid-session drop renders "Reconnecting…" + resume kick fires reconnect + revoked-permissions resume blocks reconnect, §2g pull-to-refresh fires `Dumbbell.refresh` fan-out + scan restart on both populated and empty top region). Includes the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
+- ✅ **State + group + widget + screen unit tests** — 246 tests total covering `state/{weights,preferences,unit_auto_matcher,permission_request_flow,selection_model}` (incl. §2h `customNameFor`), `devices/{dumbbell,weight_group}` (incl. `GroupSnapshot` derivations + `remove()` race guard + §2a reconnect supervisor: trigger conditions, backoff schedule via `fake_async`, `remove()`-mid-`waiting`, `remove()`-mid-`attempting`, `disconnectAll()` cancel, `kickReconnectsForResume`, in-flight protection, `setWeightIndex` skips reconnecting members), `widgets/{weight_button,dumbbell_card,failed_device_card,status_toast}` (incl. `TextScaler` 1.6× large-font safety + the optional `onRemove` affordance + the mid-session-drop "Disconnected" state + the §2a "Reconnecting…" state via `retryState` prop + §2h chip-tap toast message format with / without `customName` + §2h toast fades in, auto-dismisses, doesn't intercept taps), `screens/{home,permission,settings,about}_screen` (warm-start seeding, promote-on-tap, retry, ×-remove, auto-match-from-dock, unit-toggle live re-label, consensus / motor-active, persisted-set, BT-adapter-off banner, permission-revoked-on-resume re-route, scan-empty hint + Scan again, §2a mid-session drop renders "Reconnecting…" + resume kick fires reconnect + revoked-permissions resume blocks reconnect, §2g pull-to-refresh fires `Dumbbell.refresh` fan-out + scan restart on both populated and empty top region, §2h chip-tap on a connected card annotates the toast with the user-set name, chip-tap on a FailedDeviceCard reads "Device $id is Failed"). Includes the `0xD1` byte-8 parse. All tests above `lib/ble/` consume the port types — none import `package:flutter_blue_plus/`. `flutter analyze` clean.
 - ✅ **Multi-device fan-out (architectural)** — `WeightGroup.setWeightIndex` fan-out covered by unit tests against a fake-Dumbbell.
 
 ### Pending — needs on-device verification (Android + iOS)
@@ -454,6 +462,11 @@ The unit + widget test suites cover the pure-Dart and Flutter-widget layers, but
   - **BT-adapter toggle**: connect, then toggle Bluetooth off in the OS quick-settings panel (the "BT is off" banner appears at the top of Home, cards flip to "Reconnecting…" as the supervisor's retries fail in succession against the off adapter). Toggle BT back on — within seconds the cards reconnect, not after a 60 s backoff wait. This is the in-foreground analogue of the resume kick.
   - **Half-responsive device**: a depleted-battery dock may briefly wake its BLE radio (the OS-level connect succeeds) but never reply to `queryStatus`. In this state the card stays on "Connecting…" with a "—" weight, the weight grid stays disabled, and tapping × is the recovery affordance — the supervisor doesn't kick in here because the dumbbell never reached `isReady` (this is initial-connect territory, not mid-session).
   - Resume with revoked permissions (Android): connect, power off so the card is "Reconnecting…", background, revoke "Nearby devices", foreground → HomeScreen routes to PermissionScreen and no reconnect attempt fires during the resume window (verifies the order in `_recheckPermissions`).
+- **§2h status-pill toast spot-checks:**
+  - With a renamed connected dumbbell, tap the chip → centered toast reads `Device <real id> (<your name>) is Connected`, fades in, holds for ~1.6 s, fades out. While the toast is on screen, tapping a weight tile still fires the BLE write (toast is non-blocking) and tapping × on a card still removes it.
+  - Without a rename, the same tap reads `Device <real id> is Connected` — no parenthesised name, no advertised-name fallback.
+  - On a failed connect, tap the "Failed" chip → `Device <real id> [(<your name>)] is Failed`. Tapping refresh on the same card still retries.
+  - On a chip that's truncated to "Conne…" (e.g. very narrow phone width), the toast text matches the full state word ("Connected") — confirms the message uses `statusLabel`, not the visible (truncated) chip text.
 
 #### iOS (verification platform)
 

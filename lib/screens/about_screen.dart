@@ -26,8 +26,8 @@ class AboutScreen extends StatelessWidget {
   static final Uri _authorEmailUri = Uri.parse('mailto:rbp@isnomore.net');
 
   Future<void> _open(BuildContext context, Uri uri) async {
-    final launch = launchUri ??
-        (u) => launchUrl(u, mode: LaunchMode.externalApplication);
+    final launch =
+        launchUri ?? (u) => launchUrl(u, mode: LaunchMode.externalApplication);
     bool ok;
     try {
       ok = await launch(uri);
@@ -117,8 +117,7 @@ class AboutScreen extends StatelessWidget {
               ),
               _AuthorLine(
                 color: scheme.primary,
-                onTapEmail: () =>
-                    unawaited(_open(context, _authorEmailUri)),
+                onTapEmail: () => unawaited(_open(context, _authorEmailUri)),
               ),
               const SizedBox(height: 24),
               Text('Credits', style: theme.textTheme.titleMedium),

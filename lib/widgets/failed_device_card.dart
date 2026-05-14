@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../ble/device_ref.dart';
 import 'rename_device_dialog.dart';
+import 'status_toast.dart';
 
 /// Card shown for a [DeviceRef] whose `connect()` threw. Visually matches
 /// `DumbbellCard` but with an error-coloured "Failed" status chip, a
@@ -23,11 +24,16 @@ class FailedDeviceCard extends StatelessWidget {
   /// failed connect).
   final VoidCallback onRemove;
 
-  /// User-chosen display name override (§2e). When null, falls back
-  /// to `device.displayName`. Mirrors [DumbbellCard.displayName] so a
+  /// Resolved name to render — custom name when set, else
+  /// `device.displayName`. Mirrors [DumbbellCard.displayName] so a
   /// rename made on the connected card carries over if the device
   /// fails to reconnect later.
   final String? displayName;
+
+  /// User-set custom name (§2e), or `null` if absent. Drives the §2h
+  /// status-pill toast: "Device $id ($customName) is Failed" when set,
+  /// "Device $id is Failed" otherwise. Mirrors [DumbbellCard.customName].
+  final String? customName;
 
   /// User tapped the name region to commit a rename. See
   /// [DumbbellCard.onRename] for semantics. When null, the name region
@@ -41,6 +47,7 @@ class FailedDeviceCard extends StatelessWidget {
     required this.onRetry,
     required this.onRemove,
     this.displayName,
+    this.customName,
     this.onRename,
   });
 
@@ -50,6 +57,13 @@ class FailedDeviceCard extends StatelessWidget {
     final result = await showRenameDeviceDialog(context, initialName: name);
     if (result == null) return;
     cb(result);
+  }
+
+  /// §2h: status-pill tap. State is always "Failed" for this card.
+  void _handleStatusTap(BuildContext context) {
+    final namePart =
+        (customName != null && customName!.isNotEmpty) ? ' ($customName)' : '';
+    showStatusToast(context, 'Device ${device.id}$namePart is Failed');
   }
 
   @override
@@ -68,7 +82,28 @@ class FailedDeviceCard extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            _StatusChip(label: 'Failed', color: errorColor),
+            // §2h: chip is tappable so a user can pull up the full
+            // "Device $id ($name) is Failed" message — the pill itself
+            // is fixed-width and may truncate on narrow phones. Keyed
+            // so widget tests can target the tap region directly.
+            //
+            // Vertical Padding bumps the GestureDetector's opaque hit
+            // area to the Material 48 dp minimum without enlarging
+            // the visual chip. NOT `SizedBox + Center` — the chip's
+            // private [_StatusChip] uses `alignment: Alignment.center`
+            // with no explicit height, which would make it expand to
+            // fill any tall parent and the `borderRadius: 999` would
+            // round it into a near-circle. Mirrors the same wrapper
+            // on [DumbbellCard].
+            GestureDetector(
+              key: const ValueKey('status-chip-tap'),
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _handleStatusTap(context),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                child: _StatusChip(label: 'Failed', color: errorColor),
+              ),
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -126,8 +161,9 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final fontSize =
-        label.length <= 10 ? (theme.textTheme.labelSmall?.fontSize ?? 12) * 0.9 : theme.textTheme.labelSmall?.fontSize;
+    final fontSize = label.length <= 10
+        ? (theme.textTheme.labelSmall?.fontSize ?? 12) * 0.9
+        : theme.textTheme.labelSmall?.fontSize;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

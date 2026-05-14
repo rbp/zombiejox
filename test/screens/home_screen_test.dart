@@ -889,8 +889,7 @@ void main() {
   group('rename (§2e)', () {
     testWidgets(
         'tap name on a connected card → dialog → OK persists the custom '
-        'name to Preferences AND the card re-renders with it',
-        (tester) async {
+        'name to Preferences AND the card re-renders with it', (tester) async {
       final prefs = await _freshPrefs(remembered: ['AA:01']);
       final ctx = await _pumpHome(tester, prefs: prefs);
       ctx.fakes.single.emitState(
@@ -942,6 +941,68 @@ void main() {
           reason: 'scan list reflects the saved custom name');
       expect(find.text('DB200-AA01'), findsNothing,
           reason: 'advertised name is hidden by the user-chosen name');
+    });
+  });
+
+  group('status pill toast (§2h)', () {
+    testWidgets(
+        'tap the status pill on a connected card → toast surfaces the '
+        r'full "Device $id is $state" message; rename annotates with '
+        'the custom name', (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'units': 'lbs',
+        'remembered_device_ids': const ['AA:BB:CC'],
+        'custom_device_names': '{"AA:BB:CC":"Left"}',
+      });
+      final prefs = await Preferences.load();
+      final ctx = await _pumpHome(tester, prefs: prefs);
+      ctx.fakes.single.emitState(
+        const DumbbellState(weightIndex: 0, motorActive: false, batteryPct: 80),
+      );
+      await tester.pumpAndSettle();
+
+      // Tap the chip via its stable key. We don't assert on the chip's
+      // *label* (it depends on when the fake's connectionState event
+      // is observed by the StreamBuilder — broadcast streams don't
+      // replay to late subscribers in the test fake), but the toast
+      // message reflects whatever state the chip is in at tap time.
+      // What matters here is the *wireup*: HomeScreen threads
+      // [SelectionModel.customNameFor] through, so the toast includes
+      // "(Left)" exactly when a custom name is set.
+      await tester.tap(find.byKey(const ValueKey('status-chip-tap')));
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(
+        find.textContaining('Device AA:BB:CC (Left) is'),
+        findsOneWidget,
+        reason: 'HomeScreen threads SelectionModel.customNameFor into the '
+            'card so the toast annotates with the user-set name',
+      );
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+        'tap the status pill on a FailedDeviceCard → toast says '
+        r'"Device $id is Failed" (no rename ⇒ no annotation)', (tester) async {
+      final prefs = await _freshPrefs(remembered: ['AA:BB:CC']);
+      final scanner = _FakeScanner();
+      addTearDown(scanner.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: HomeScreen(
+          preferences: prefs,
+          checkPermissionsGranted: () async => true,
+          scanner: scanner,
+          createWeightGroup: () => WeightGroup(newDumbbell: (d) {
+            return _FakeDumbbell(d)..failConnect = true;
+          }),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(FailedDeviceCard), findsOneWidget);
+      await tester.tap(find.text('Failed'));
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(find.text('Device AA:BB:CC is Failed'), findsOneWidget);
+      await tester.pumpAndSettle();
     });
   });
 
