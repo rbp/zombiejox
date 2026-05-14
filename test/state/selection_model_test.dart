@@ -347,5 +347,26 @@ void main() {
       model.rename(_device('AA:01'), null);
       expect(model.customNameFor(_device('AA:01')), isNull);
     });
+
+    test(
+        'selected entry with null customName is authoritative — does NOT '
+        'fall back to a stale value in Preferences.customDeviceNames '
+        '(Copilot review on PR #28: a failed write or write race must '
+        'not let the toast keep the old name)', () async {
+      // Arrange: device is selected with no custom name in memory.
+      final prefs = await _prefs(remembered: ['AA:01']);
+      final model = SelectionModel(preferences: prefs);
+      expect(model.customNameFor(_device('AA:01')), isNull);
+
+      // Simulate prefs drifting out of sync with the in-memory entry —
+      // the on-disk map says 'Stale' but the selected entry was never
+      // renamed in this session.
+      await prefs.setCustomDeviceNames({'AA:01': 'Stale'});
+
+      // The in-memory entry must win for selected devices.
+      expect(model.customNameFor(_device('AA:01')), isNull,
+          reason: 'selected entry is authoritative — prefs fallback only '
+              'applies to devices NOT in the selection');
+    });
   });
 }

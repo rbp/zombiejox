@@ -108,13 +108,22 @@ class SelectionModel extends ChangeNotifier {
   /// dumbbell, never the advertised name (which is duplicated info
   /// next to the device id).
   ///
-  /// Consults the in-selection entry first; for a device NOT in the
-  /// selection (e.g. it appears only in the bottom scan list), falls
-  /// back to [Preferences.customDeviceNames] so a previously-renamed
-  /// dumbbell that's been removed still reports the user's name.
+  /// For a device IN the selection, the in-memory entry is the
+  /// authoritative answer — including when the user has just cleared
+  /// the rename (`customName == null`). We do *not* fall back to the
+  /// prefs map in that case, otherwise a stale persisted value (or a
+  /// failed write) would let the toast keep annotating with the old
+  /// name even though the user just wiped it.
+  ///
+  /// For a device NOT in the selection (e.g. it appears only in the
+  /// bottom scan list, or hasn't been promoted yet on a fresh launch),
+  /// fall back to [Preferences.customDeviceNames] so a previously-
+  /// renamed dumbbell still reports the user's name.
   String? customNameFor(DeviceRef device) {
     final entry = entryFor(device);
-    final raw = entry?.customName ?? _preferences.customDeviceNames[device.id];
+    final String? raw = entry != null
+        ? entry.customName
+        : _preferences.customDeviceNames[device.id];
     final trimmed = raw?.trim();
     if (trimmed == null || trimmed.isEmpty) return null;
     return trimmed;
