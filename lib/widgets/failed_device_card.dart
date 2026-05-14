@@ -86,11 +86,20 @@ class FailedDeviceCard extends StatelessWidget {
             // "Device $id ($name) is Failed" message — the pill itself
             // is fixed-width and may truncate on narrow phones. Keyed
             // so widget tests can target the tap region directly.
+            //
+            // 48-dp Center wrapper to bring the hit target up to the
+            // Material minimum without enlarging the visual chip.
+            // Mirrors the same wrapper on [DumbbellCard].
             GestureDetector(
               key: const ValueKey('status-chip-tap'),
               behavior: HitTestBehavior.opaque,
               onTap: () => _handleStatusTap(context),
-              child: _StatusChip(label: 'Failed', color: errorColor),
+              child: SizedBox(
+                height: 48,
+                child: Center(
+                  child: _StatusChip(label: 'Failed', color: errorColor),
+                ),
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(

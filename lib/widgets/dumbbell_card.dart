@@ -258,11 +258,23 @@ class _Card extends StatelessWidget {
             // also picks up taps, not just the rendered pill. Keyed
             // so widget tests can target the tap region directly
             // (chip *label* depends on a still-pending state stream).
+            //
+            // The chip itself renders at ~22 dp tall — well under the
+            // Material 48 dp minimum touch target. Wrap the chip in a
+            // 48-dp-tall, chip-width SizedBox + Center so the hit
+            // area meets the guideline while the chip's visual size
+            // stays unchanged. The row already hits 48 dp (the × icon
+            // button), so this doesn't grow the card.
             GestureDetector(
               key: const ValueKey('status-chip-tap'),
               behavior: HitTestBehavior.opaque,
               onTap: () => _handleStatusTap(context, statusLabel),
-              child: _StatusChip(label: statusLabel, color: statusColor),
+              child: SizedBox(
+                height: 48,
+                child: Center(
+                  child: _StatusChip(label: statusLabel, color: statusColor),
+                ),
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(

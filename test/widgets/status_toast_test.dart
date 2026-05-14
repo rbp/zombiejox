@@ -39,14 +39,13 @@ void main() {
       'fade-out durations', (tester) async {
     await _pumpHost(tester, 'auto-dismiss-me');
     await tester.tap(find.text('fire'));
+    // Pump past the fade-in so the toast is visible on screen.
     await tester.pump(kStatusToastFadeDuration);
     expect(find.text('auto-dismiss-me'), findsOneWidget);
-    // Advance past visible-hold + fade-out + the microtask gap where
-    // `await _controller.reverse()` resolves before `entry.remove()` runs.
-    await tester.pump(kStatusToastVisibleDuration);
-    await tester.pump(kStatusToastFadeDuration);
-    // One extra pump so the OverlayEntry rebuild after `remove()` lands.
-    await tester.pump();
+    // The toast is one continuous TweenSequence animation (fade-in +
+    // hold + fade-out). pumpAndSettle drives it to completion in one
+    // shot — no Timer to schedule separately.
+    await tester.pumpAndSettle();
     expect(find.text('auto-dismiss-me'), findsNothing,
         reason: 'toast must clean itself up; otherwise repeated taps '
             'would leak overlay entries');
@@ -84,10 +83,7 @@ void main() {
     await tester.pump(kStatusToastFadeDuration);
     expect(fireCount, 2, reason: 'toast must not block taps on the host UI');
     expect(find.text('toast-2'), findsOneWidget);
-    // Drain the auto-dismiss timers so the test exits cleanly (each
-    // toast: hold + fade-out + one frame for the OverlayEntry rebuild).
-    await tester.pump(kStatusToastVisibleDuration);
-    await tester.pump(kStatusToastFadeDuration);
-    await tester.pump();
+    // Drain the toast animations so the test exits cleanly.
+    await tester.pumpAndSettle();
   });
 }

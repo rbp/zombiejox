@@ -46,33 +46,56 @@ class _StatusToast extends StatefulWidget {
 
 class _StatusToastState extends State<_StatusToast>
     with SingleTickerProviderStateMixin {
+  // One controller, one animation, three phases driven by a
+  // TweenSequence: fade-in → hold-at-1 → fade-out. No `Timer` —
+  // a `Timer` scheduled inside an animation status listener never
+  // fires under `tester.pump()` (the FakeAsync zone enqueues it but
+  // the binding's pump only drives transient frame callbacks). Going
+  // entirely through SchedulerBinding's frame loop keeps the toast
+  // lifecycle test-pumpable end-to-end, AND makes
+  // [kStatusToastVisibleDuration] the actual full-opacity hold —
+  // not "fade-in + hold" as it was when the timer started at insertion.
   late final AnimationController _controller = AnimationController(
     vsync: this,
-    duration: kStatusToastFadeDuration,
-    reverseDuration: kStatusToastFadeDuration,
+    duration: kStatusToastFadeDuration +
+        kStatusToastVisibleDuration +
+        kStatusToastFadeDuration,
   );
-
-  Timer? _hideTimer;
+  late final Animation<double> _opacity;
 
   @override
   void initState() {
     super.initState();
+    final fadeMs = kStatusToastFadeDuration.inMilliseconds;
+    final holdMs = kStatusToastVisibleDuration.inMilliseconds;
+    _opacity = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween<double>(begin: 0, end: 1)
+            .chain(CurveTween(curve: Curves.fastOutSlowIn)),
+        weight: fadeMs.toDouble(),
+      ),
+      TweenSequenceItem(
+        tween: ConstantTween<double>(1),
+        weight: holdMs.toDouble(),
+      ),
+      TweenSequenceItem(
+        tween: Tween<double>(begin: 1, end: 0)
+            .chain(CurveTween(curve: Curves.fastOutSlowIn)),
+        weight: fadeMs.toDouble(),
+      ),
+    ]).animate(_controller);
+    _controller.addStatusListener(_onComplete);
     unawaited(_controller.forward());
-    _hideTimer = Timer(kStatusToastVisibleDuration, () {
-      unawaited(_beginFadeOut());
-    });
   }
 
-  Future<void> _beginFadeOut() async {
-    if (!mounted) return;
-    await _controller.reverse();
+  void _onComplete(AnimationStatus status) {
+    if (status != AnimationStatus.completed) return;
     if (!mounted) return;
     widget.onDismissed();
   }
 
   @override
   void dispose() {
-    _hideTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -87,7 +110,7 @@ class _StatusToastState extends State<_StatusToast>
       child: IgnorePointer(
         child: Center(
           child: FadeTransition(
-            opacity: _controller,
+            opacity: _opacity,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 360),
               child: Material(
@@ -101,10 +124,21 @@ class _StatusToastState extends State<_StatusToast>
                     horizontal: 16,
                     vertical: 12,
                   ),
-                  child: Text(
-                    widget.message,
-                    style: TextStyle(color: scheme.onInverseSurface),
-                    textAlign: TextAlign.center,
+                  // `liveRegion: true` so screen readers announce the
+                  // message when it appears. Without this the toast
+                  // is silent for AT users — the chip is tappable but
+                  // the response (the toast text) never reaches them
+                  // before the auto-dismiss removes it from the tree.
+                  // `container: true` so the announcement is one
+                  // coherent unit rather than a stream of glyphs.
+                  child: Semantics(
+                    container: true,
+                    liveRegion: true,
+                    child: Text(
+                      widget.message,
+                      style: TextStyle(color: scheme.onInverseSurface),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                 ),
               ),

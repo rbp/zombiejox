@@ -513,9 +513,8 @@ void main() {
   });
 
   testWidgets(
-      'status pill tap (§2h): toast text mirrors the current state — '
-      '"Moving" while motorActive, "Reconnecting" while a retry is pending',
-      (tester) async {
+      'status pill tap (§2h): toast says "is Reconnecting" while a '
+      'retry is pending', (tester) async {
     final fake = _FakeDumbbell(_device('AA:01'));
     addTearDown(fake.dispose);
 
@@ -538,6 +537,27 @@ void main() {
     await tester.tap(find.text('Reconnecting'));
     await tester.pump(const Duration(milliseconds: 250));
     expect(find.text('Device AA:01 is Reconnecting'), findsOneWidget);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+      'status pill tap (§2h): toast says "is Moving" while motorActive '
+      'is true (separate from the Reconnecting case so a Moving-side '
+      'regression actually fails)', (tester) async {
+    final fake = _FakeDumbbell(_device('AA:01'));
+    addTearDown(fake.dispose);
+
+    await _pump(tester,
+        DumbbellCard(dumbbell: fake, unit: WeightUnit.lbs, onRemove: () {}));
+    fake.emitConnected();
+    fake.emitState(
+      const DumbbellState(weightIndex: 2, motorActive: true, batteryPct: 80),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('Moving'));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('Device AA:01 is Moving'), findsOneWidget);
     await tester.pumpAndSettle();
   });
 
