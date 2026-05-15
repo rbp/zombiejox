@@ -6,7 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 /// About screen. Static content: who built this, what it's for, what it
 /// runs on top of. Reachable from Settings.
 ///
-/// Layout (§2c of IMPLEMENTATION_PLAN.md):
+/// Layout:
 ///   1. Logo + app name + tagline at the top.
 ///   2. "What it is" pitch.
 ///   3. GitHub link + "Created by Rodrigo Pimentel \<rbp@isnomore.net\>"
@@ -26,8 +26,7 @@ class AboutScreen extends StatelessWidget {
   static final Uri _authorEmailUri = Uri.parse('mailto:rbp@isnomore.net');
 
   Future<void> _open(BuildContext context, Uri uri) async {
-    final launch =
-        launchUri ?? (u) => launchUrl(u, mode: LaunchMode.externalApplication);
+    final launch = launchUri ?? (u) => launchUrl(u, mode: LaunchMode.externalApplication);
     bool ok;
     try {
       ok = await launch(uri);

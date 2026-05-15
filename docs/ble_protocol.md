@@ -295,16 +295,7 @@ Standard Android BLE bonding. No custom pairing code. References: `DeviceManager
 
 ---
 
-## 10. Recommended Flutter implementation order
-
-1. **Connect to the dumbbells with `flutter_blue_plus`** using service UUID `AAE28F00-...`. Subscribe to RX char (`AAE28F01-...`).
-2. **Send a query-status packet** (`FF 04 D1 16` — opcode `0xD1`, no payload, length=4) and verify the device replies on RX with a frame whose opcode byte is 209.
-3. **Send `0xD6 <weight>` set-weight commands** (e.g. `FF 05 D6 14 28` for 20 lbs) and confirm the dumbbells physically change weight.
-4. **Capture HCI snoop log** of the original app doing a kg/lbs toggle to find that opcode.
-
-The MVP is steps 1–3. History sync, user-account sync, and kg/lbs toggle are nice-to-haves.
-
-### Quick disassembly recipe (for future native-code questions)
+## Quick disassembly recipe (for future native-code questions)
 
 Tooling already on the machine (Xcode CLT):
 ```
