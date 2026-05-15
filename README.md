@@ -25,37 +25,46 @@ no telemetry, no account.
 
 ## Status
 
-| Product                     | Code   | Status                           |
-|-----------------------------|--------|----------------------------------|
-| DumbbellConnect             | DB200  | 🟡 In progress                   |
-| KettlebellConnect 2.0       | KB200  | 🟡 Protocol known, untested      |
-| KettlebellConnect (legacy)  | KB42   | 🟡 Protocol known, untested      |
-| FoamRollerConnect           | FR100  | ⚪ Not yet                       |
-| PushUpConnect               | PB220  | ⚪ Not yet                       |
-| Chileaf-branded HRMs        | CL8xx  | ⚪ Not yet                       |
+| Product                     | Code   | Status                                              |
+|-----------------------------|--------|-----------------------------------------------------|
+| DumbbellConnect             | DB200  | 🟢 Feature-complete; on-device verification pending |
+| KettlebellConnect 2.0       | KB200  | 🟡 Protocol known, untested                         |
+| KettlebellConnect (legacy)  | KB42   | 🟡 Protocol known, untested                         |
+| FoamRollerConnect           | FR100  | ⚪ Not yet                                          |
+| PushUpConnect               | PB220  | ⚪ Not yet                                          |
+| Chileaf-branded HRMs        | CL8xx  | ⚪ Not yet                                          |
 
-If you have one of the untested devices and want to help, open an issue.
+For DumbbellConnect: Phases 0–2 of [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) are complete (reverse-engineering, MVP, polish + hardening). Phase 3 (testing on real Android + iOS hardware, then distribution) is the remaining gate before a public release. If you have one of the untested devices and want to help, open an issue.
 
 ## What it does
 
 - Scans for and connects to one or more DumbbellConnect (`DB200`) devices over BLE
-- Connects to the whole pair (or any number) in one trip — tick each in the scan list, hit "Connect (N)"
-- Adjusts the weight remotely — all eight settings (8 / 14 / 20 / 26 / 32 / 38 / 44 / 50 lbs); a single tap sets every connected dumbbell at once
-- Shows live status per dumbbell: current weight, battery, motion state
+- Single Home screen — tap any scanned dumbbell to promote it to the selected set; one weight tile tap sets every connected dumbbell in parallel
+- All eight weight settings (8 / 14 / 20 / 26 / 32 / 38 / 44 / 50 lbs)
+- Live per-dumbbell status: current weight, battery, motion state, connection state
 - Reflects manual weight changes (set via the dock's own buttons) in the UI
-- lbs / kg toggle in Settings (default follows your locale)
+- Auto-reconnect after a mid-session drop, with exponential backoff and a fast-forward kick when the app comes back to the foreground or Bluetooth is toggled back on
+- Warm-start: relaunching the app reconnects to last session's dumbbells with no scan-and-pick round-trip
+- Tap the status pill on any card for a centered toast spelling out the connection state in full
+- Tap-to-rename — give your dumbbells real names; the rename persists across launches and removal
+- Pull down to refresh — re-query state from the dumbbells and restart the scan
+- lbs / kg toggle in Settings; flipping it re-labels every weight tile live. On first connect, if you haven't picked a unit, the app silently matches whatever your docks are physically set to.
+- Edge-case screens for Bluetooth off (with one-tap Enable on Android), all devices out of range, mid-session disconnect, and permission revoked while backgrounded
+- Pre-permission rationale on first launch — a plain "this is what we need Bluetooth for, here's why" before the OS prompt fires
+- Dark theme seeded from aubergine; tablet + landscape + large-font safe
+- Custom launcher icon and splash on both platforms
 - About screen with credits, license, and a pointer to the protocol docs
-- Pre-permission rationale on first launch — clear "this is what we need Bluetooth for, here's why" before the OS prompt fires
+- No cloud, no account, no telemetry — everything stays on your phone
 
 ## What it doesn't do (yet)
 
-- Remember devices between launches / auto-reconnect
-- Edge-case screens (Bluetooth-off, all devices out of range, mid-session disconnect)
-- Connect to KettlebellConnect, FoamRollerConnect, or Chileaf HRMs
-- Run verified on iOS (the scaffold exists; not yet tested on a real iPhone)
-- Have its own app icon (still showing the default Flutter logo)
+- Run verified on iOS — the scaffold exists and `flutter build ios --release` works, but it hasn't been tested on a real iPhone yet (see Phase 3 in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md))
+- Per-device weight override — useful for asymmetric warm-up sets, where you want one dumbbell heavier than the other. Deferred to post-release (§4a).
+- Connect to KettlebellConnect, FoamRollerConnect, or Chileaf HRMs — the protocols are catalogued in [`docs/ble_protocol.md`](docs/ble_protocol.md) but the scan filter and device classes for them aren't wired up
+- Light theme — dark only for now
+- Sync workout history off the dock (`0xD3` / `0xD4` opcodes are documented but unparsed)
 
-## What it wil never do
+## What it will never do
 
 - Workout tracking, exercise library, social features, "Fitness IQ"
   scores, training plans — none of it. The original app's cloud is
@@ -83,7 +92,7 @@ flutter run
 
 ## Contributing
 
-PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the conventions —
+PRs are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for the conventions —
 short version: AI-assisted contributions are fine if you understand and
 verify them, hardware-touching changes need an on-device test, and `main`
 always works.
