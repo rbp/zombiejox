@@ -134,6 +134,19 @@ Unlike Android, you can't `flutter run` straight onto a physical iPhone without 
 
 If `flutter devices` doesn't list the iPhone after step 5, see the error above — it's almost always the signing chain, not the cable. Once a working `flutter run` lands once, subsequent runs are fast.
 
+If you're having trouble building the app, try
+
+```sh
+# from repo root
+flutter clean
+flutter pub get
+(cd ios && pod install)
+
+# Then delete ZombieJox from the iPhone home screen so iOS resets its persisted CB authorization, and:
+
+flutter run -d <iphone-device-id>
+```
+
 #### iOS-specific points to confirm
 
 37. **First-launch rationale.** This is the riskiest unverified assumption in the project. `permission_handler` reports `denied` for `Permission.bluetoothScan` / `bluetoothConnect` on iOS *until the OS has prompted at least once*, **but the OS prompt itself is triggered by `flutter_blue_plus`'s first BLE op** (controlled by `NSBluetoothAlwaysUsageDescription` in `ios/Runner/Info.plist`), not by our `permission_handler.request()` call. Expected: rationale appears → Continue → OS prompt → grant → Home. If the rationale screen doesn't show, or Continue feels like a no-op (iOS reports "granted" so we navigate to Home and the OS prompt fires from Home's first BLE call), the routing logic needs to be revisited — possibly a "rationale shown" flag specifically for iOS.
