@@ -1,34 +1,27 @@
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import 'screens/home_screen.dart';
 import 'screens/permission_screen.dart';
+import 'state/bluetooth_permissions.dart';
 import 'state/preferences.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final prefs = await Preferences.load();
-  final permissionsGranted = await _bluetoothPermissionsGranted();
+  final permissionsGranted = await _safeBluetoothPermissionsGranted();
   runApp(ZombieJoxApp(
     preferences: prefs,
     permissionsGranted: permissionsGranted,
   ));
 }
 
-/// Quick non-prompting check of the Bluetooth permission state. Used to
-/// decide between the rationale screen (not granted) and going straight
-/// to the home screen (granted). Re-checked on every cold start so OS-
-/// level revocations re-trigger the rationale.
-///
 /// Defaults to `false` on plugin-channel failure so a flaky platform call
 /// can't crash startup — the user lands on the rationale screen, which is
 /// the safer fallback (it has the Open-Settings escape hatch).
-Future<bool> _bluetoothPermissionsGranted() async {
+Future<bool> _safeBluetoothPermissionsGranted() async {
   try {
-    final scan = await Permission.bluetoothScan.status;
-    final connect = await Permission.bluetoothConnect.status;
-    return scan.isGranted && connect.isGranted;
+    return await bluetoothPermissionsGranted();
   } catch (_) {
     return false;
   }

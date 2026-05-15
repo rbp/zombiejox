@@ -11,6 +11,7 @@ import '../ble/device_ref.dart';
 import '../ble/uuids.dart';
 import '../devices/dumbbell.dart';
 import '../devices/weight_group.dart';
+import '../state/bluetooth_permissions.dart';
 import '../state/preferences.dart';
 import '../state/selection_model.dart';
 import '../state/unit_auto_matcher.dart';
@@ -48,8 +49,8 @@ class HomeScreen extends StatefulWidget {
 
   /// Override the Bluetooth-permission status check — used by widget tests
   /// to avoid the `permission_handler` platform channel. In production
-  /// this is null and the screen reads the bluetoothScan/Connect statuses
-  /// directly.
+  /// this is null and the screen reads the platform's BT permission
+  /// status via `bluetoothPermissionsGranted()`.
   final Future<bool> Function()? checkPermissionsGranted;
 
   /// Override the BLE scan source — tests pass a fake to avoid touching
@@ -207,12 +208,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// Default for the lifecycle re-check seam (see [_recheckPermissions]).
   /// iOS won't re-prompt once denied, so we hand the user back to
   /// [PermissionScreen] rather than re-prompting inline — the rationale
-  /// + denied + Open-Settings UI lives in one place.
-  static Future<bool> _defaultCheckPermissionsGranted() async {
-    final scan = await Permission.bluetoothScan.status;
-    final connect = await Permission.bluetoothConnect.status;
-    return scan.isGranted && connect.isGranted;
-  }
+  /// + denied + Open-Settings UI lives in one place. The iOS-vs-Android
+  /// permission split lives in `state/bluetooth_permissions.dart`.
+  static Future<bool> _defaultCheckPermissionsGranted() =>
+      bluetoothPermissionsGranted();
 
   /// Devices for which a reconnect-failure SnackBar has already been
   /// shown for the current drop. Cleared per-device once the device
