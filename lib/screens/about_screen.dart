@@ -192,26 +192,43 @@ class _AuthorLine extends StatelessWidget {
               TextSpan(
                 style: baseStyle,
                 children: [
-                  const TextSpan(text: 'Created by Rodrigo Pimentel <'),
+                  const TextSpan(text: 'Created by Rodrigo Pimentel '),
+                  // Wrap the whole `<email>` group in a single outer
+                  // WidgetSpan so the line breaker treats it as one
+                  // atomic placeholder — narrow widths wrap at the space
+                  // before this span instead of orphaning `<` or `>`.
+                  // Only the inner InkWell is tappable; the brackets stay inert.
                   WidgetSpan(
                     alignment: PlaceholderAlignment.baseline,
                     baseline: TextBaseline.alphabetic,
-                    child: Tooltip(
-                      message: 'Email the author',
-                      child: InkWell(
-                        onTap: onTapEmail,
-                        borderRadius: BorderRadius.circular(4),
-                        child: Text(
-                          'rbp@isnomore.net',
-                          style: TextStyle(
-                            color: color,
-                            decoration: TextDecoration.underline,
+                    child: Text.rich(
+                      TextSpan(
+                        style: baseStyle,
+                        children: [
+                          const TextSpan(text: '<'),
+                          WidgetSpan(
+                            alignment: PlaceholderAlignment.baseline,
+                            baseline: TextBaseline.alphabetic,
+                            child: Tooltip(
+                              message: 'Email the author',
+                              child: InkWell(
+                                onTap: onTapEmail,
+                                borderRadius: BorderRadius.circular(4),
+                                child: Text(
+                                  'rbp@isnomore.net',
+                                  style: TextStyle(
+                                    color: color,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                          const TextSpan(text: '>'),
+                        ],
                       ),
                     ),
                   ),
-                  const TextSpan(text: '>'),
                 ],
               ),
             ),

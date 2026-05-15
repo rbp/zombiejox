@@ -387,46 +387,10 @@ Shipped in one PR.
 - Test connection reliability, reconnect-on-resume, weight change responsiveness
 - Test with N dumbbells simultaneously (start with the user's pair)
 
-- Write a TESTING.md guide for testing. There should be a short session showing which commands to call for running automated tests, and a thorough but succint "Manual testing" session, with complete instructions for each platform.
-
 ### 3b. Build & distribute
-- Android: build APK/AAB, distribute via GitHub releases (sideload — Google Play won't host hobby apps for orphaned hardware)
+- Android: build APK/AAB, distribute via Google Play + GitHub releases
 - iOS: TestFlight for personal use, or App Store submission
 - Open-source release for the JaxJox community
-
----
-
-## Phase 4: Post-release — 🗓️ deferred
-
-Items intentionally deferred past the initial release. Not gating Phase 3 (testing & distribution); revisited once the app has real-world usage to inform priorities.
-
-### 4a. Per-device weight override (was §2f)
-
-i.e., asymmetric setting, gated behind a Settings toggle. Lets the user push different indices to each dumbbell in the group (warm-up / strip-set scenarios). Lands on top of the existing `SelectionModel` (per-device user-owned metadata is already the model's responsibility per ADR-001 §4) and `WeightGroup.setWeightIndex` fan-out.
-
----
-
-## Key Risks & Mitigations
-
-| Risk | Status |
-|------|--------|
-| Protocol uses encryption/auth beyond standard BLE pairing | **Resolved** — static + native analysis shows no auth on DumbbellConnect. The two native exports that looked auth-shaped (`fetchPassCode`, `fetchBeat`) are Chileaf-HRM logic, not used for dumbbells. |
-| APK is heavily obfuscated | **Mostly resolved** — JADX decompiled with 45 minor errors; the protocol surface (BLE callbacks, packet builder, opcodes) decompiled cleanly. |
-| Firmware requires specific app signature/certificate | **Unlikely** — X8IQ's iOS app works without the cloud; user confirmed in 0a. |
-| N dumbbells need simultaneous control | **Designed in** — `WeightGroup` abstraction fans out a single `setWeightIndex` to all connected devices in parallel. `flutter_blue_plus` supports concurrent connections. |
-| BLE plugin lock-in (breaking changes on upgrade, no path to a second transport) | **Mitigated by PR #14** — `flutter_blue_plus` is now confined to `lib/ble/` behind `BleTransport` + `BleScanner`. A plugin swap (or a parallel transport for wear OS / web BLE) is a single-file change, not a codebase-wide refactor. |
-
----
-
-## Recommended Order of Work
-
-**Phases 0, 1, and 2 are all complete.** End-to-end: set + read weight on N dumbbells via a single Home screen with promote-on-tap, per-card × remove, tap-to-rename, pull-to-refresh, tappable status-pill toast; warm-start seeding; Settings/About with reactive unit toggle; auto-match-from-dock; dark M3 theme; large-font + tablet portability; custom icon + splash; mid-drop auto-reconnect with resume kick. Edge-case states (BT off, all out of range, mid-session drops, permission revoked mid-session) all have explicit UI. Remaining work is on-device verification (Phase 3); the only deferred feature is §4a (per-device weight override).
-
-1. ✅ Phase 0 reverse-engineering (0a–0e done; 0f closed via static analysis — no HCI snoop needed)
-2. ✅ Phase 1 — Flutter MVP — PRs merged: #1, #2, #3, #7, #8, #10, #14–#20, plus the edge-case PR closing §1h.
-3. ✅ Phase 2 — UX and UI improvements. §2a (state-stream robustness — auto-reconnect on drop + resume kick) + §2b (UX polish — animations + haptic + reconnect SnackBar) + §2c (About screen) + §2d (Design v1) + §2e (rename dumbbells) + §2g (pull-down to refresh) + §2h (tappable status pill → toast) all shipped. §2f (per-device weight override) moved to Phase 4.
-4. ⏳ Phase 3 — Testing & distribution
-5. 🗓️ Phase 4 — Post-release deferred work (§4a per-device weight override)
 
 ---
 
@@ -443,30 +407,30 @@ i.e., asymmetric setting, gated behind a Settings toggle. Lets the user push dif
 
 The unit + widget test suites cover the pure-Dart and Flutter-widget layers, but they cannot exercise the BLE platform channels, the OS permission prompt UX, or actual motor motion. These need a **real device** for both platforms:
 
-#### Android (primary dev platform)
+#### Android (primary dev platform) ✅
 
-- Permission rationale → Continue → OS prompt fires → grant → lands on the Home screen.
-- Permission rationale → Continue → OS prompt → deny → lands on the denied-state UI with `Open Settings` and `Try again`.
-- `Try again` reverts to the rationale and re-requests on Continue.
-- Revoke Bluetooth permission via Settings.app, relaunch app: rationale shows again (because `Permission.bluetoothScan.isGranted` is now false). Verifies the routing-on-status logic.
-- Cold launch with no remembered devices: top region shows "Tap a dumbbell below to connect"; bottom region scans and lists at least one `DB200` dumbbell when in range.
-- Tap a scan card → it moves to the top region in `connecting` state and the connect kicks off immediately (promote-on-tap).
-- Tap × on a top card: dumbbell disconnects, slot drops, scanner keeps running. If you do it while still `connecting`, the racing connect doesn't resurrect the slot.
-- Tap weight buttons → physically moves the dumbbell(s) to that setting. Extremes "8 lbs" / "50 lbs" both work.
-- Switching to kg in Settings re-labels every weight tile live **without** a navigation round-trip (validates the reactive `Preferences.unit` listener).
-- About screen renders: logo at the top (cream-background app icon, rounded, crisp on a high-DPR device — the `cacheWidth` / `cacheHeight` plumbing should decode at display size), app name + tagline, "What it is", a tappable GitHub row, a "Created by Rodrigo Pimentel <rbp@isnomore.net>" line where **only the email span is tappable** (icon + surrounding text inert), and the Credits / Protocol / License / Disclaimer sections readable without scrolling jankiness. Tap GitHub → browser opens to the repo; tap email → mail composer pre-filled to `rbp@isnomore.net`.
-- **Warm-start**: after a verified connect, kill the app and relaunch. The Home screen seeds the top region with the previously-connected dumbbells in `connecting` state on the first frame; the scanner also starts immediately. No flash of an empty top region.
-- On the warm-start path, if a remembered dumbbell is out of range / offline, the `FailedDeviceCard` appears with a refresh icon for retry and an × for dismissal.
-- Battery percentage on each card matches what nRF Connect shows for the same device.
-- **Auto-match dock unit (no prior Settings choice)**: with both docks on kg via the physical gesture, connect → "Unit set to kg to match your dumbbells." SnackBar, weight buttons re-label to `3.6 kg` … `22.7 kg`. Disconnect, flip one dock to lbs, reconnect → "Dumbbells are set to different units — pick one in Settings" SnackBar; app display unit unchanged.
-- **Auto-match no-op after explicit pick**: open Settings, tap the lbs/kg toggle (either side counts as explicit). Reconnect with any unit combination → no SnackBar, no preference change.
-- **Auto-match across post-connect race**: the post-connect battery read makes a dumbbell `isReady` before the `0xD1` reply arrives. The auto-match should *not* fire on the bare battery-ready state — it should wait for the unit byte and then fire. Easiest probe: clear app data, connect; the SnackBar should arrive within ~1.5s of "Connecting…" disappearing on the cards, not instantly.
+- ✅ Permission rationale → Continue → OS prompt fires → grant → lands on the Home screen.
+- ✅ Permission rationale → Continue → OS prompt → deny → lands on the denied-state UI with `Open Settings` and `Try again`.
+- ✅ `Try again` reverts to the rationale and re-requests on Continue.
+- ✅ Revoke Bluetooth permission via Settings.app, relaunch app: rationale shows again (because `Permission.bluetoothScan.isGranted` is now false). Verifies the routing-on-status logic.
+- ✅ Cold launch with no remembered devices: top region shows "Tap a dumbbell below to connect"; bottom region scans and lists at least one `DB200` dumbbell when in range.
+- ✅ Tap a scan card → it moves to the top region in `connecting` state and the connect kicks off immediately (promote-on-tap).
+- ✅ Tap × on a top card: dumbbell disconnects, slot drops, scanner keeps running. If you do it while still `connecting`, the racing connect doesn't resurrect the slot.
+- ✅ Tap weight buttons → physically moves the dumbbell(s) to that setting. Extremes "8 lbs" / "50 lbs" both work.
+- ✅ Switching to kg in Settings re-labels every weight tile live **without** a navigation round-trip (validates the reactive `Preferences.unit` listener).
+- ✅ About screen renders: logo at the top (cream-background app icon, rounded, crisp on a high-DPR device — the `cacheWidth` / `cacheHeight` plumbing should decode at display size), app name + tagline, "What it is", a tappable GitHub row, a "Created by Rodrigo Pimentel <rbp@isnomore.net>" line where **only the email span is tappable** (icon + surrounding text inert), and the Credits / Protocol / License / Disclaimer sections readable without scrolling jankiness. Tap GitHub → browser opens to the repo; tap email → mail composer pre-filled to `rbp@isnomore.net`.
+- ✅  **Warm-start**: after a verified connect, kill the app and relaunch. The Home screen seeds the top region with the previously-connected dumbbells in `connecting` state on the first frame; the scanner also starts immediately. No flash of an empty top region.
+- ✅ On the warm-start path, if a remembered dumbbell is out of range / offline, the `FailedDeviceCard` appears with a refresh icon for retry and an × for dismissal.
+- ✅  Battery percentage on each card matches what nRF Connect shows for the same device.
+- ✅ **Auto-match dock unit (no prior Settings choice)**: with both docks on kg via the physical gesture, connect → "Unit set to kg to match your dumbbells." SnackBar, weight buttons re-label to `3.6 kg` … `22.7 kg`. Disconnect, flip one dock to lbs, reconnect → "Dumbbells are set to different units — pick one in Settings" SnackBar; app display unit unchanged.
+- ✅ **Auto-match no-op after explicit pick**: open Settings, tap the lbs/kg toggle (either side counts as explicit). Reconnect with any unit combination → no SnackBar, no preference change.
+- ✅ **Auto-match across post-connect race**: the post-connect battery read makes a dumbbell `isReady` before the `0xD1` reply arrives. The auto-match should *not* fire on the bare battery-ready state — it should wait for the unit byte and then fire. Easiest probe: clear app data, connect; the SnackBar should arrive within ~1.5s of "Connecting…" disappearing on the cards, not instantly.
 - **Edge-case spot-checks** (§1h):
-  - Bluetooth turned off mid-session (Android): the error-coloured "Bluetooth is off" banner appears at the top of the Home body, the scan area copy switches to "Turn Bluetooth on to scan.", and the banner CTA reads **"Enable Bluetooth"** — tapping it pops the OS's in-app "Allow Bluetooth?" dialog (via `BluetoothAdapter.ACTION_REQUEST_ENABLE` through `flutter_blue_plus.turnOn()`). User accepts → BT turns on → banner + copy disappear, scan resumes, supervisor's BT-on kick fast-forwards any waiting reconnects. On iOS the same banner shows but has no CTA — iOS doesn't expose a programmatic toggle; the copy instructs the user to flip BT in Settings or Control Center.
+  ✅ - Bluetooth turned off mid-session (Android): the error-coloured "Bluetooth is off" banner appears at the top of the Home body, the scan area copy switches to "Turn Bluetooth on to scan.", and the banner CTA reads **"Enable Bluetooth"** — tapping it pops the OS's in-app "Allow Bluetooth?" dialog (via `BluetoothAdapter.ACTION_REQUEST_ENABLE` through `flutter_blue_plus.turnOn()`). User accepts → BT turns on → banner + copy disappear, scan resumes, supervisor's BT-on kick fast-forwards any waiting reconnects. On iOS the same banner shows but has no CTA — iOS doesn't expose a programmatic toggle; the copy instructs the user to flip BT in Settings or Control Center.
   - All dumbbells out of range: after the 30 s scan timeout the bottom region shows "No JaxJox dumbbells found. Make sure they're powered on and in range." with a tonal Scan again button. Tap → scan restarts.
   - Mid-session drop: power off a connected dumbbell — its card flips to a "Reconnecting…" chip + body line (§2a; was "Disconnected" before §2a landed). Power it back on within a couple of minutes — the card returns to "Connected" without user intervention. Tap × on the card to give up reconnecting and drop the slot.
   - Permission revocation (Android): with HomeScreen visible, background the app, revoke "Nearby devices" in Settings.app, foreground it → HomeScreen pushes back to PermissionScreen automatically.
-- **§2a reconnect spot-checks:**
+- ✅  **§2a reconnect spot-checks:**
   - Mid-session drop on one of N: with two dumbbells connected and ready, power one off. Its card flips to "Reconnecting…" within ~2 s. The weight grid stays enabled (the other member is still ready) and any tap on the grid is fanned out only to the still-ready peer. Power the dropped dumbbell back on — within seconds its card flips back through "Connecting…" to "Connected" / "Idle". The current weight may differ from the consensus until the post-reconnect state arrives.
   - Drop on the *only* connected dumbbell: weight grid disables (no ready member). When it reconnects, grid re-enables.
   - Long drop: power a connected dumbbell off and leave it off. Card stays on "Reconnecting…" indefinitely (retry repeats at the 60 s cap once the schedule is exhausted). Tap × on the card → slot disappears, no further retries fire, and the dumbbell is removed from `rememberedDeviceIds`.
