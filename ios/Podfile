@@ -39,5 +39,21 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+    # `permission_handler_apple`'s BluetoothPermissionStrategy is gated on
+    # the `PERMISSION_BLUETOOTH=1` preprocessor macro. Without it the
+    # whole iOS BT path is compiled out — `Permission.bluetooth` falls
+    # back to `UnknownPermissionStrategy` and always reports denied no
+    # matter what the user taps. See:
+    # https://pub.dev/packages/permission_handler#setup
+    # Append (don't `||=`) — `flutter_additional_ios_build_settings`
+    # already seeds `GCC_PREPROCESSOR_DEFINITIONS` for some targets, so
+    # the naive idiom from the package readme silently no-ops there.
+    target.build_configurations.each do |config|
+      defs = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||
+          ['$(inherited)']
+      defs = [defs] unless defs.is_a?(Array)
+      defs << 'PERMISSION_BLUETOOTH=1' unless defs.include?('PERMISSION_BLUETOOTH=1')
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = defs
+    end
   end
 end

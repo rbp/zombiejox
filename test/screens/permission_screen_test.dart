@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -62,6 +64,64 @@ void main() {
     expect(find.text('Open Settings'), findsOneWidget);
     expect(find.text('Try again'), findsOneWidget);
     expect(find.textContaining('Permission was denied'), findsOneWidget);
+  });
+
+  testWidgets(
+      'denied copy on iOS spells out the Settings breadcrumb '
+      '(Settings → ZombieJox → Bluetooth) — the legacy root-level path '
+      'is the one that works on iOS 16 (Apps section only exists on '
+      'iOS 17+, and per-app entries still appear at the root there too)',
+      (tester) async {
+    // Reset inside the test body (not via addTearDown): the framework's
+    // invariant check fires before tearDowns run.
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    try {
+      final prefs = await _freshPrefs();
+      await tester.pumpWidget(MaterialApp(
+        home: PermissionScreen(
+          preferences: prefs,
+          requestPermissions: () async => false,
+        ),
+      ));
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('Settings → ZombieJox → Bluetooth'),
+        findsOneWidget,
+        reason: 'iOS deep-links to the app\'s Settings page; the breadcrumb '
+            'tells the user which toggle to flip once they land there',
+      );
+      expect(find.textContaining('Nearby devices'), findsNothing,
+          reason: 'Android-only breadcrumb must not leak onto iOS');
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets(
+      'denied copy on Android spells out the Settings breadcrumb '
+      '(Settings → Apps → ZombieJox → Permissions → Nearby devices)',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      final prefs = await _freshPrefs();
+      await tester.pumpWidget(MaterialApp(
+        home: PermissionScreen(
+          preferences: prefs,
+          requestPermissions: () async => false,
+        ),
+      ));
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Nearby devices'), findsOneWidget,
+          reason: 'Android puts the toggle under Permissions → Nearby devices');
+      expect(find.textContaining('→ Bluetooth.'), findsNothing,
+          reason: 'iOS-only breadcrumb tail must not leak onto Android');
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   testWidgets('Try again → returns to the rationale state', (tester) async {

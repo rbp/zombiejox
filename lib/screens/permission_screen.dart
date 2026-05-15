@@ -1,8 +1,11 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../state/bluetooth_permissions.dart';
 import '../state/permission_request_flow.dart';
 import '../state/preferences.dart';
 import 'home_screen.dart';
@@ -46,15 +49,10 @@ class PermissionScreen extends StatefulWidget {
   // not requested. On iOS we'd crash without `NSLocationWhenInUseUsageDescription`
   // in Info.plist, so location is never requested on either platform.
   // Android ≤11 (where scanning requires ACCESS_FINE_LOCATION) is not
-  // supported by this build — see IMPLEMENTATION_PLAN.md.
-  static Future<bool> _defaultRequestPermissions() async {
-    final statuses = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-    ].request();
-    return statuses[Permission.bluetoothScan]?.isGranted == true &&
-        statuses[Permission.bluetoothConnect]?.isGranted == true;
-  }
+  // supported by this build — see IMPLEMENTATION_PLAN.md. The iOS-vs-Android
+  // permission split lives in `state/bluetooth_permissions.dart`.
+  static Future<bool> _defaultRequestPermissions() =>
+      requestBluetoothPermissions();
 
   void _defaultOnGranted(BuildContext context) {
     unawaited(
@@ -114,6 +112,23 @@ class _PermissionScreenState extends State<PermissionScreen> {
                 builder: (context, state, _) {
                   final denied = state == PermissionFlowState.denied;
                   final requesting = state == PermissionFlowState.requesting;
+                  // iOS sends the user to a per-app Settings page with a
+                  // single Bluetooth toggle; Android buries it under the
+                  // app's permissions list. A generic "in your settings"
+                  // line leaves users hunting, so spell the path out.
+                  // The Open Settings button deep-links to the right
+                  // place via UIApplicationOpenSettingsURLString /
+                  // Android's app-detail intent; this breadcrumb is just
+                  // for users who navigate manually. The iOS path is
+                  // also valid on iOS 17+ even though that release added
+                  // a `Settings → Apps` consolidation — per-app entries
+                  // still appear at the root.
+                  final isAndroid =
+                      defaultTargetPlatform == TargetPlatform.android;
+                  final deniedPath = isAndroid
+                      ? 'Settings → Apps → ZombieJox → Permissions → '
+                          'Nearby devices'
+                      : 'Settings → ZombieJox → Bluetooth';
                   return Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -133,8 +148,8 @@ class _PermissionScreenState extends State<PermissionScreen> {
                       Text(
                         denied
                             ? 'Permission was denied. ZombieJox can\'t talk to your '
-                                'JaxJox dumbbells without Bluetooth access. You can '
-                                'grant it in your phone\'s settings.'
+                                'JaxJox dumbbells without Bluetooth access. Tap '
+                                'Open Settings, then grant it under $deniedPath.'
                             : 'ZombieJox uses Bluetooth to talk to your JaxJox '
                                 'dumbbells. No data leaves your phone — no cloud, no '
                                 'account, no telemetry.',
