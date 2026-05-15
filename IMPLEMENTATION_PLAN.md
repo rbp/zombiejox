@@ -203,7 +203,7 @@ Edge-case states (§1h):
 
 ### Out of scope for MVP (deferred)
 
-- Per-dumbbell weight override (asymmetric warmup) — Phase 2+
+- Per-dumbbell weight override (asymmetric warmup) — Phase 4 (§4a)
 - History sync (`0xD3` / `0xD4`)
 - Username (`0xC0`) — has no effect on motor control. Will not be implemented at all, unless we discover that there is a functional need.
 - Other JaxJox products (Kettlebell, FoamRoller, PushUp, HRMs)
@@ -218,11 +218,11 @@ Edge-case states (§1h):
 
 ---
 
-## Phase 2: Polish & hardening — 🟡 partially shipped
+## Phase 2: Polish & hardening — ✅ complete
 
 Phase 2 fleshes out the MVP scaffold with proper error handling, edge-case hardening, and visual polish. Not a separate implementation pass — incremental work on top of Phase 1.
 
-Shipped so far: §2a (state-stream robustness — auto-reconnect on drop + resume kick), §2b (UX polish — animations + haptic + reconnect-failure SnackBar + activity glyph), §2c (About screen restructure), §2d (Design v1), §2e (rename dumbbells — `SelectionModel` extracted in same PR), §2g (pull-down to refresh — `Dumbbell.refresh` + `WeightGroup.refresh` + top-region `RefreshIndicator`), §2h (tappable status pill → centered toast). Outstanding: §2f (per-device weight override).
+Shipped: §2a (state-stream robustness — auto-reconnect on drop + resume kick), §2b (UX polish — animations + haptic + reconnect-failure SnackBar + activity glyph), §2c (About screen restructure), §2d (Design v1), §2e (rename dumbbells — `SelectionModel` extracted in same PR), §2g (pull-down to refresh — `Dumbbell.refresh` + `WeightGroup.refresh` + top-region `RefreshIndicator`), §2h (tappable status pill → centered toast). §2f (per-device weight override) deferred to Phase 4 (post-release).
 
 ### ADR-001 — four sources of truth in the running app
 
@@ -345,8 +345,9 @@ Shipped in one PR alongside the `SelectionModel` extraction promised in ADR-001.
 - **Rename-preservation on remove.** Removing a renamed dumbbell from the selection does NOT wipe its rename — `_persistCustomNames` merges the still-on-disk entries for non-selected devices. Re-promoting later restores the name.
 - **Normalization in one place.** `SelectionModel.rename(device, name)` trims surrounding whitespace; a `null` or whitespace-only argument clears the custom name (falls back to advertised / id). The dialog returns the raw user input unmodified — the model is the single normalization point so callers (HomeScreen + tests) can't accidentally diverge.
 
-### 2f. Per-device weight override
-i.e., asymmetric setting, gated behind a Settings toggle
+### 2f. Per-device weight override — deferred
+
+Moved to Phase 4 (post-release). See §4a.
 
 ### 2g. Pull-down to refresh — ✅ done
 
@@ -395,6 +396,16 @@ Shipped in one PR.
 
 ---
 
+## Phase 4: Post-release — 🗓️ deferred
+
+Items intentionally deferred past the initial release. Not gating Phase 3 (testing & distribution); revisited once the app has real-world usage to inform priorities.
+
+### 4a. Per-device weight override (was §2f)
+
+i.e., asymmetric setting, gated behind a Settings toggle. Lets the user push different indices to each dumbbell in the group (warm-up / strip-set scenarios). Lands on top of the existing `SelectionModel` (per-device user-owned metadata is already the model's responsibility per ADR-001 §4) and `WeightGroup.setWeightIndex` fan-out.
+
+---
+
 ## Key Risks & Mitigations
 
 | Risk | Status |
@@ -409,12 +420,13 @@ Shipped in one PR.
 
 ## Recommended Order of Work
 
-**Phase 0 + Phase 1 are complete; §2a state-stream robustness + §2c About + §2d Design v1 have landed.** End-to-end: set + read weight on N dumbbells via a single Home screen with promote-on-tap and per-card × remove, warm-start seeding, Settings/About with reactive unit toggle, auto-match-from-dock, dark M3 theme, large-font + tablet portability, custom icon + splash. Edge-case states (BT off, all out of range, mid-session drops with auto-reconnect, permission revoked mid-session) all have explicit UI. Remaining work is on-device verification + further Phase 2 polish.
+**Phases 0, 1, and 2 are all complete.** End-to-end: set + read weight on N dumbbells via a single Home screen with promote-on-tap, per-card × remove, tap-to-rename, pull-to-refresh, tappable status-pill toast; warm-start seeding; Settings/About with reactive unit toggle; auto-match-from-dock; dark M3 theme; large-font + tablet portability; custom icon + splash; mid-drop auto-reconnect with resume kick. Edge-case states (BT off, all out of range, mid-session drops, permission revoked mid-session) all have explicit UI. Remaining work is on-device verification (Phase 3); the only deferred feature is §4a (per-device weight override).
 
 1. ✅ Phase 0 reverse-engineering (0a–0e done; 0f closed via static analysis — no HCI snoop needed)
 2. ✅ Phase 1 — Flutter MVP — PRs merged: #1, #2, #3, #7, #8, #10, #14–#20, plus the edge-case PR closing §1h.
-3. 🟡 Phase 2 — UX and UI improvements. §2a (state-stream robustness — auto-reconnect on drop + resume kick) + §2b (UX polish — animations + haptic + reconnect SnackBar) + §2c (About screen) + §2d (Design v1) + §2e (rename dumbbells) + §2g (pull-down to refresh) + §2h (tappable status pill → toast) shipped. Still pending: §2f (per-device weight override).
+3. ✅ Phase 2 — UX and UI improvements. §2a (state-stream robustness — auto-reconnect on drop + resume kick) + §2b (UX polish — animations + haptic + reconnect SnackBar) + §2c (About screen) + §2d (Design v1) + §2e (rename dumbbells) + §2g (pull-down to refresh) + §2h (tappable status pill → toast) all shipped. §2f (per-device weight override) moved to Phase 4.
 4. ⏳ Phase 3 — Testing & distribution
+5. 🗓️ Phase 4 — Post-release deferred work (§4a per-device weight override)
 
 ---
 
