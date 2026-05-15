@@ -27,14 +27,14 @@ no telemetry, no account.
 
 | Product                     | Code   | Status                                              |
 |-----------------------------|--------|-----------------------------------------------------|
-| DumbbellConnect             | DB200  | 🟢 Feature-complete; on-device verification pending |
+| DumbbellConnect             | DB200  | 🟢 Feature-complete; verified on Android + iOS      |
 | KettlebellConnect 2.0       | KB200  | 🟡 Protocol known, untested                         |
 | KettlebellConnect (legacy)  | KB42   | 🟡 Protocol known, untested                         |
 | FoamRollerConnect           | FR100  | ⚪ Not yet                                          |
 | PushUpConnect               | PB220  | ⚪ Not yet                                          |
 | Chileaf-branded HRMs        | CL8xx  | ⚪ Not yet                                          |
 
-For DumbbellConnect: Phases 0–2 of [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) are complete (reverse-engineering, MVP, polish + hardening). Phase 3 (testing on real Android + iOS hardware, then distribution) is the remaining gate before a public release. If you have one of the untested devices and want to help, open an issue.
+For DumbbellConnect: the implementation  is complete (reverse-engineering, MVP, polish + hardening), and the app has been verified on real Android + iOS hardware. If you have one of the untested devices and want to help, open an issue.
 
 ## What it does
 
@@ -58,7 +58,6 @@ For DumbbellConnect: Phases 0–2 of [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_P
 
 ## What it doesn't do (yet)
 
-- Run verified on iOS — the scaffold exists and `flutter build ios --release` works, but it hasn't been tested on a real iPhone yet (see Phase 3 in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md))
 - Per-device weight override — useful for asymmetric warm-up sets, where you want one dumbbell heavier than the other. Deferred to post-release (§4a).
 - Connect to KettlebellConnect, FoamRollerConnect, or Chileaf HRMs — the protocols are catalogued in [`docs/ble_protocol.md`](docs/ble_protocol.md) but the scan filter and device classes for them aren't wired up
 - Light theme — dark only for now

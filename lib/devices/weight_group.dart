@@ -132,8 +132,7 @@ class GroupSnapshot {
 /// blip (the dumbbell briefly out of range) resolves without the user
 /// staring at a "Reconnecting…" chip for two seconds. After the schedule
 /// is exhausted, the last entry repeats indefinitely — the cancel UI is
-/// the × button on the card, not a give-up timeout (see §2a in
-/// IMPLEMENTATION_PLAN.md).
+/// the × button on the card, not a give-up timeout.
 const List<Duration> _kBackoffSchedule = [
   Duration.zero,
   Duration(seconds: 2),
@@ -180,8 +179,7 @@ class WeightGroup {
   // map on the snapshot for consumers.
   final Map<Dumbbell, Timer> _retryTimers = {};
   final Map<Dumbbell, RetryState> _retryStates = {};
-  final StreamController<GroupSnapshot> _controller =
-      StreamController.broadcast();
+  final StreamController<GroupSnapshot> _controller = StreamController.broadcast();
   GroupSnapshot _last = GroupSnapshot.empty;
   final Dumbbell Function(DeviceRef) _newDumbbell;
   bool _disposed = false;
@@ -189,8 +187,7 @@ class WeightGroup {
   /// [newDumbbell] is the factory used by [add] to construct new dumbbells.
   /// Defaults to the real [Dumbbell] implementation; tests pass a factory
   /// that returns a fake.
-  WeightGroup({Dumbbell Function(DeviceRef)? newDumbbell})
-      : _newDumbbell = newDumbbell ?? Dumbbell.new;
+  WeightGroup({Dumbbell Function(DeviceRef)? newDumbbell}) : _newDumbbell = newDumbbell ?? Dumbbell.new;
 
   /// The current snapshot, available synchronously so callers can render
   /// before any stream event arrives (e.g. the first build of a screen).
@@ -465,10 +462,8 @@ class WeightGroup {
     // `cancel()` calls below are awaited best-effort, and we don't want
     // a late event to slip through during that window and emit a
     // post-teardown snapshot.
-    final stateSubs =
-        List<StreamSubscription<DumbbellState>>.from(_stateSubs.values);
-    final connSubs =
-        List<StreamSubscription<BleConnectionState>>.from(_connSubs.values);
+    final stateSubs = List<StreamSubscription<DumbbellState>>.from(_stateSubs.values);
+    final connSubs = List<StreamSubscription<BleConnectionState>>.from(_connSubs.values);
     _stateSubs.clear();
     _connSubs.clear();
     _lastSeen.clear();
@@ -562,9 +557,7 @@ class WeightGroup {
   void _scheduleNextAttempt(Dumbbell db) {
     final entry = _retryStates[db];
     if (entry == null) return;
-    final i = entry.attempt < _kBackoffSchedule.length
-        ? entry.attempt
-        : _kBackoffSchedule.length - 1;
+    final i = entry.attempt < _kBackoffSchedule.length ? entry.attempt : _kBackoffSchedule.length - 1;
     final delay = _kBackoffSchedule[i];
     _retryTimers[db]?.cancel();
     _retryTimers[db] = Timer(delay, () {

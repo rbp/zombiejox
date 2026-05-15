@@ -1,7 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -49,10 +48,9 @@ class PermissionScreen extends StatefulWidget {
   // not requested. On iOS we'd crash without `NSLocationWhenInUseUsageDescription`
   // in Info.plist, so location is never requested on either platform.
   // Android ≤11 (where scanning requires ACCESS_FINE_LOCATION) is not
-  // supported by this build — see IMPLEMENTATION_PLAN.md. The iOS-vs-Android
+  // supported by this build. The iOS-vs-Android
   // permission split lives in `state/bluetooth_permissions.dart`.
-  static Future<bool> _defaultRequestPermissions() =>
-      requestBluetoothPermissions();
+  static Future<bool> _defaultRequestPermissions() => requestBluetoothPermissions();
 
   void _defaultOnGranted(BuildContext context) {
     unawaited(
@@ -74,8 +72,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
   // mid-screen), the next Continue tap picks up the new callback rather
   // than the one that was current when the flow was constructed.
   late final PermissionRequestFlow _flow = PermissionRequestFlow(
-    request: () => (widget.requestPermissions ??
-        PermissionScreen._defaultRequestPermissions)(),
+    request: () => (widget.requestPermissions ?? PermissionScreen._defaultRequestPermissions)(),
   );
 
   @override
@@ -123,8 +120,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
                   // also valid on iOS 17+ even though that release added
                   // a `Settings → Apps` consolidation — per-app entries
                   // still appear at the root.
-                  final isAndroid =
-                      defaultTargetPlatform == TargetPlatform.android;
+                  final isAndroid = defaultTargetPlatform == TargetPlatform.android;
                   final deniedPath = isAndroid
                       ? 'Settings → Apps → ZombieJox → Permissions → '
                           'Nearby devices'
@@ -178,8 +174,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
                           onPressed: requesting ? null : _onContinue,
                           child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 12),
-                            child:
-                                Text(requesting ? 'Requesting…' : 'Continue'),
+                            child: Text(requesting ? 'Requesting…' : 'Continue'),
                           ),
                         ),
                     ],

@@ -103,6 +103,5 @@ The `_disposed` flag pattern is hand-rolled in `Dumbbell`, `WeightGroup`, and `B
 
 - The `protocol/` layer transcribes `docs/ble_protocol.md`. When something doesn't match, the doc is right and the code is wrong — until you've proven otherwise on hardware. If so, update the doc.
 - Reverse-engineering artifacts (decompiled APK, `libfitness.so` notes) live under `reverse-engineering/` and are reference material, not buildable code.
-- `IMPLEMENTATION_PLAN.md` is the phase plan; check it when you're unsure whether a piece of behaviour is in scope.
 - `CONTRIBUTING.md` covers the PR workflow, AI-assistance disclosure, and the merge rules.
 - One logical change per PR. Branch off `main`. Don't push to `main` directly.

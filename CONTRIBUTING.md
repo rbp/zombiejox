@@ -28,7 +28,6 @@ The conditions:
 - **`dart format .` your changes** before pushing.
 - **Documentation is part of the change, not a follow-up.** If your PR changes:
   - the BLE protocol → update [`docs/ble_protocol.md`](docs/ble_protocol.md). This doc is the canonical reference. The Dart code transcribes from it, not the other way around. New BLE findings update the doc first.
-  - the implementation status / phase plan → update [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
   - user-visible behaviour or supported devices → update the [README](README.md).
 
 ## Hardware safety
