@@ -140,6 +140,19 @@ Unlike Android, you can't `flutter run` straight onto a physical iPhone without 
 
 If `flutter devices` doesn't list the iPhone after step 6, see the error above — it's almost always the signing chain, not the cable. Once a working `flutter run` lands once, subsequent runs are fast.
 
+If you're having trouble building the app, try
+
+```sh
+# from repo root
+flutter clean
+flutter pub get
+(cd ios && pod install)
+
+# Then delete ZombieJox from the iPhone home screen so iOS resets its persisted CB authorization, and:
+
+flutter run -d <iphone-device-id>
+```
+
 #### iOS-specific points to confirm
 
 37. **First-launch rationale.** Cold install → rationale appears → Continue → iOS system Bluetooth prompt → Allow → lands on Home. In **debug** builds (`flutter run`) the iOS Local Network prompt — *"ZombieJox would like to find and connect to devices on your local network"* — fires at app startup, before the rationale renders. That's Flutter's debug VM service advertising itself via mDNS so the IDE / DevTools can attach for hot reload; it has nothing to do with our BT flow and won't appear in release / TestFlight builds. Tap Allow and the rationale continues normally. Two things had to be true for the BT path to work, and both are easy to lose in a fresh setup, so call them out explicitly when this test fails: (a) `lib/state/bluetooth_permissions.dart` requests `Permission.bluetooth` on iOS — `Permission.bluetoothScan` / `bluetoothConnect` route through `UnknownPermissionStrategy` in `permission_handler_apple` and always report `permanentlyDenied`; (b) `ios/Podfile`'s `post_install` hook sets `PERMISSION_BLUETOOTH=1` in `GCC_PREPROCESSOR_DEFINITIONS` — without it, the real `BluetoothPermissionStrategy` is compiled out and `Permission.bluetooth` *also* falls through to `UnknownPermissionStrategy`. If the macro change isn't in your Pods project, run `(cd ios && pod install)` before re-running this test. Re-running on a fresh install (delete the app first to reset iOS's persisted CB authorization) is the canonical regression check.
